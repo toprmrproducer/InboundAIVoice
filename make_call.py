@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from livekit import api
 
 # Load environment variables
-load_dotenv(".env.local")
+load_dotenv(".env")
 
 async def main():
     parser = argparse.ArgumentParser(description="Make an outbound call via LiveKit Agent.")

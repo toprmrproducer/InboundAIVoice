@@ -110,6 +110,10 @@ uv run python make_call.py --to +919988776655 (your number)
 3.  The agent joins a secure room (e.g., `call-9148...`).
 4.  The agent dials the phone number via the Vobiz SIP trunk.
 5.  **When the user answers**, the agent will start listening and speaking.
+6.  **Call Transfer**: You can ask the agent to transfer you.
+    *   *Default*: "Transfer me." -> Transfers to the configured default number.
+    *   *Custom*: "Transfer me to +1..." -> Transfers to the specific number.
+    *   For detailed setup and troubleshooting, see [transfer_call.md](transfer_call.md).
 
 ---
 
