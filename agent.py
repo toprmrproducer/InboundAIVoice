@@ -125,32 +125,57 @@ class AgentTools(llm.ToolContext):
             return "I'm having trouble transferring right now. Please hold on."
 
 
-    # ── Tool 2: Save Booking Intent ────────────────────────────────────────
+    # ── Tool 2: End Call (auto-hangup) ────────────────────────────────────
 
     @llm.function_tool(
-        description="Save the caller's intent to book an appointment for a specific date and time. Do this ONLY AFTER the caller has verbally confirmed the date, time, and their full name. This does not instantly book it, but queues it to be booked right after the call.",
+        description=(
+            "End the call and hang up. Use this ONLY when: "
+            "(1) the caller explicitly says 'bye', 'goodbye', 'cut the call', or has confirmed their booking and the conversation is complete. "
+            "(2) the caller says they don't need anything else. "
+            "Say a short goodbye BEFORE calling this tool."
+        )
+    )
+    async def end_call(self) -> str:
+        logger.info("[TOOL] end_call triggered — hanging up.")
+        try:
+            if self.ctx_api and self.room_name and self._sip_identity:
+                await self.ctx_api.sip.transfer_sip_participant(
+                    api.TransferSIPParticipantRequest(
+                        room_name=self.room_name,
+                        participant_identity=self._sip_identity,
+                        transfer_to="tel:+0",  # Sends REFER to empty destination = hangup
+                        play_dialtone=False,
+                    )
+                )
+            return "Call ended."
+        except Exception as e:
+            logger.warning(f"[end_call] Graceful hangup failed, forcing disconnect: {e}")
+            return "Goodbye!"
+
+
+    # ── Tool 3: Save Booking Intent ────────────────────────────────────────
+
+    @llm.function_tool(
+        description="Save the caller's intent to book an appointment for a specific date and time. Do this ONLY AFTER the caller has verbally confirmed the date, time, full name, and email address. This queues the booking to be confirmed right after the call.",
     )
     async def save_booking_intent(
         self,
-        start_time: Annotated[str, "The exact ISO 8601 start time with IST offset. Match this against the slots returned by check_availability. Example: '2026-02-24T10:00:00+05:30'"],
+        start_time: Annotated[str, "The exact ISO 8601 start time with IST offset. Example: '2026-02-24T10:00:00+05:30'"],
         caller_name: Annotated[str, "Full name of the caller as they stated it."],
-        treatment_notes: Annotated[str, "Any relevant notes the caller mentioned — reason for appointment, service needed, etc."] = "",
+        caller_email: Annotated[str, "Email address of the caller for booking confirmation."] = "",
+        treatment_notes: Annotated[str, "Any relevant notes — service needed, preferences, etc."] = "",
     ) -> str:
-        """Saves the booking details to memory so the agent can finalize it once they hang up."""
         logger.info(f"Booking intent saved: {start_time} for {caller_name}")
-        
-        # If the caller provides a name here, we update our context
         if caller_name and len(caller_name) > 1:
             self.caller_name = caller_name
-
         self.booking_intent = {
             "start_time": start_time,
             "caller_name": self.caller_name,
             "caller_phone": self.caller_phone,
-            "notes": treatment_notes
+            "caller_email": caller_email,
+            "notes": treatment_notes,
         }
-        
-        return f"Successfully saved intent to book {start_time}. Tell the user their booking is confirmed and they will receive a text shortly."
+        return f"Booking intent saved for {start_time}. Tell the caller their appointment is confirmed and they'll receive a confirmation text shortly."
 
 
     # ── Tool 4: Cancel Appointment ─────────────────────────────────────────
@@ -167,16 +192,10 @@ class AgentTools(llm.ToolContext):
         reason: Annotated[str, "Reason for cancellation as stated by the caller."] = "Caller changed their mind",
     ):
         logger.info(f"[TOOL] cancel_appointment: reason={reason}")
-
         if not self.booking_intent:
             return "I don't have an active booking from this call to cancel."
-
-        # Clear the booking intent
         self.booking_intent = None
-        return (
-            "No problem — I've cancelled your booking. "
-            "Would you like to reschedule for another time?"
-        )
+        return "No problem — I've cancelled your booking. Would you like to reschedule for another time?"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -185,24 +204,26 @@ class AgentTools(llm.ToolContext):
 
 class OutboundAssistant(Agent):
 
-    def __init__(self, agent_tools: AgentTools):
+    def __init__(self, agent_tools: AgentTools, first_line: str = ""):
         tools = llm.find_function_tools(agent_tools)
-        # Load the latest prompt from the UI dashboard config
+        self._first_line = first_line
         live_config = get_live_config()
         base_instructions = live_config.get("agent_instructions", "")
-        
-        # Inject the real-time IST clock into the prompt
         ist_context = get_ist_time_context()
         final_instructions = base_instructions + ist_context
-        
         super().__init__(
             instructions=final_instructions,
             tools=tools,
         )
 
     async def on_enter(self):
+        greeting = self._first_line or (
+            "Namaste! Welcome to Daisy's Med Spa. "
+            "Main aapki kaise madad kar sakti hoon? "
+            "I can answer questions about our treatments or help you book an appointment."
+        )
         await self.session.generate_reply(
-            instructions="Say exactly this phrase without any extra thinking: 'Namaste! Welcome to Daisy's Med Spa. Main aapki kaise madad kar sakti hoon? I can answer questions about our treatments or help you book an appointment.'"
+            instructions=f"Say exactly this phrase: '{greeting}'"
         )
 
 
@@ -286,14 +307,15 @@ async def entrypoint(ctx: JobContext):
 
 
     # ── Build agent ───────────────────────────────────────────────────────
-    agent = OutboundAssistant(agent_tools=agent_tools)
+    agent = OutboundAssistant(agent_tools=agent_tools, first_line=first_line)
 
     # ── Read live configuration ───────────────────────────────────────────
     live_config = get_live_config()
-    delay_setting = live_config.get("stt_min_endpointing_delay", 0.6)
+    delay_setting = live_config.get("stt_min_endpointing_delay", 0.15)
     llm_model = live_config.get("llm_model", "gpt-4o-mini")
     tts_voice = live_config.get("tts_voice", "rohan")
     tts_language = live_config.get("tts_language", "hi-IN")
+    first_line = live_config.get("first_line", "")
 
     # Override OS environment variables if they are set in the UI dashboard
     for key in ["LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "OPENAI_API_KEY", "SARVAM_API_KEY", "CAL_API_KEY", "TELEGRAM_BOT_TOKEN", "SUPABASE_URL", "SUPABASE_KEY"]:
@@ -323,13 +345,14 @@ async def entrypoint(ctx: JobContext):
     # ── Start Sarvam-powered session ──────────────────────────────────────
     session = AgentSession(
         stt=sarvam.STT(
-            language="hi-IN",        # Force Hindi/Hinglish detection
+            language="hi-IN",
             model="saaras:v3",
-            mode="translate",        # Translate to enable faster English LLM processing
+            mode="translate",
             flush_signal=True,
         ),
         llm=openai.LLM(
-            model=llm_model,     # Dynamic LLM choice from dashboard
+            model=llm_model,
+            max_tokens=150,           # Voice responses should be short — caps LLM latency
         ),
         tts=sarvam.TTS(
             target_language_code=tts_language,
@@ -337,8 +360,9 @@ async def entrypoint(ctx: JobContext):
             speaker=tts_voice,
         ),
         turn_detection="stt",
-        min_endpointing_delay=0.15,     # Raised from 0.07 — stops false self-interruptions
+        min_endpointing_delay=0.07,   # Faster response cutoff for natural pacing
         allow_interruptions=True,
+        preemptive_synthesis=True,    # Start TTS as LLM streams — saves ~500ms
     )
 
     await session.start(
@@ -348,21 +372,6 @@ async def entrypoint(ctx: JobContext):
             close_on_disconnect=False,
         ),
     )
-
-    FILLERS = [
-        "Haan, ek second...",
-        "Ji, dekhte hain...",
-        "Bilkul, abhi batata hoon...",
-    ]
-
-    @session.on("user_speech_committed")
-    def _on_speech_committed(ev):
-        transcript = ev.user_transcript.strip()
-        if len(transcript) > 3:
-            filler = random.choice(FILLERS)
-            asyncio.create_task(
-                session.say(filler, add_to_chat_ctx=False)
-            )
 
     logger.info("[AGENT] Session live — waiting for caller audio.")
     call_start_time = datetime.now()
