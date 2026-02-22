@@ -124,84 +124,67 @@ class SarvamSynthStream(tts.SynthesizeStream):
     def __init__(self, *, tts: SarvamStreamingTTS, conn_options: APIConnectOptions):
         super().__init__(tts=tts, conn_options=conn_options)
         self._tts_ref = tts
-        self._segments_ch = utils.aio.Chan[tokenize.WordStream]()
 
     async def _run(self, output_emitter: tts.AudioEmitter) -> None:
-        t          = self._tts_ref
-        request_id = utils.shortuuid()
+        t = self._tts_ref
 
         output_emitter.initialize(
-            request_id=request_id,
+            request_id=utils.shortuuid(),
             sample_rate=t._sample_rate,
             num_channels=1,
             stream=True,
             mime_type="audio/pcm",
         )
 
-        async def _tokenize_input() -> None:
-            """Convert incoming text stream into word-level streams per sentence"""
-            async for data in self._input_ch:
-                if isinstance(data, self._FlushSentinel):
-                    self._segments_ch.close()
-                    return
-                word_stream = tokenize.basic.SentenceTokenizer().stream()
-                self._segments_ch.send_nowait(word_stream)
-                if isinstance(data, str):
-                    word_stream.push_text(data)
-                word_stream.end_input()
+        # Buffer text tokens, synthesize per sentence boundary
+        sentence_buffer: list[str] = []
 
-        async def _process_segments() -> None:
-            """Synthesise each sentence segment via Sarvam WebSocket"""
-            async for word_stream in self._segments_ch:
-                await _synthesize_segment(word_stream, output_emitter)
-
-        async def _synthesize_segment(
-            word_stream: tokenize.WordStream,
-            emitter: tts.AudioEmitter,
-        ) -> None:
-            segment_id = utils.shortuuid()
-            emitter.start_segment(segment_id=segment_id)
-
-            # Collect full sentence text from the word stream
-            sentence = ""
-            async for token in word_stream:
-                sentence += token.token
-
-            sentence = sentence.strip()
-            if not sentence:
+        async def _flush_sentence(text: str) -> None:
+            text = text.strip()
+            if not text:
                 return
 
-            logger.debug(f"[SarvamTTS] Synthesising: '{sentence[:60]}'")
+            logger.debug(f"[SarvamTTS] Synthesising sentence: '{text[:80]}'")
 
-            client = AsyncSarvamAI(api_subscription_key=t._api_key)
+            segment_id = utils.shortuuid()
+            output_emitter.start_segment(segment_id=segment_id)  # ← one per full sentence
 
-            async with client.text_to_speech_streaming.connect(model="bulbul:v3") as ws:
-                await ws.configure(
-                    target_language_code=t._language,
-                    speaker=t._speaker,
-                    pace=t._pace,
-                    min_buffer_size=t._min_buffer_size,
-                    output_audio_codec="pcm",
-                )
-                await ws.convert(sentence)
-                await ws.flush()
+            try:
+                client = AsyncSarvamAI(api_subscription_key=t._api_key)
+                async with client.text_to_speech_streaming.connect(model="bulbul:v3") as ws:
+                    await ws.configure(
+                        target_language_code=t._language,
+                        speaker=t._speaker,
+                        pace=t._pace,
+                        min_buffer_size=t._min_buffer_size,
+                        output_audio_codec="pcm",
+                    )
+                    await ws.convert(text)
+                    await ws.flush()
 
-                chunk_count = 0
-                async for message in ws:
-                    if isinstance(message, AudioOutput):
-                        emitter.push(base64.b64decode(message.data.audio))
-                        chunk_count += 1
-                        if chunk_count == 1:
-                            logger.debug("[SarvamTTS] ✅ First chunk pushed")
-                    elif isinstance(message, EventResponse):
-                        if message.data.event_type == "final":
-                            break
+                    async for message in ws:
+                        if isinstance(message, AudioOutput):
+                            output_emitter.push(base64.b64decode(message.data.audio))
+                        elif isinstance(message, EventResponse):
+                            if message.data.event_type == "final":
+                                break
+            finally:
+                output_emitter.end_segment()  # ← MUST end before next start_segment()
 
-        tasks = [
-            asyncio.create_task(_tokenize_input()),
-            asyncio.create_task(_process_segments()),
-        ]
-        try:
-            await asyncio.gather(*tasks)
-        finally:
-            await utils.aio.gracefully_cancel(*tasks)
+        async for data in self._input_ch:
+            if isinstance(data, self._FlushSentinel):
+                # Flush whatever is left in the buffer
+                if sentence_buffer:
+                    await _flush_sentence("".join(sentence_buffer))
+                    sentence_buffer.clear()
+            elif isinstance(data, str):
+                sentence_buffer.append(data)
+                # Check for sentence-ending punctuation and flush eagerly
+                joined = "".join(sentence_buffer)
+                if joined.endswith((".", "?", "!", "।")):
+                    await _flush_sentence(joined)
+                    sentence_buffer.clear()
+
+        # Final drain if anything remains
+        if sentence_buffer:
+            await _flush_sentence("".join(sentence_buffer))
