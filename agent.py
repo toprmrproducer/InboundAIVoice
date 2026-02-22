@@ -335,7 +335,6 @@ async def entrypoint(ctx: JobContext):
             language="hi-IN",
             pace=1.1,
             min_buffer_size=50,
-            sample_rate=8000,
         ),
         turn_detection="stt",
         min_endpointing_delay=0.15,     # Raised from 0.07 — stops false self-interruptions
