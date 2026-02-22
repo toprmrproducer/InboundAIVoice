@@ -13,11 +13,17 @@ from sarvamai.types import AudioOutput, EventResponse
 
 from livekit import rtc
 from livekit.agents import tts
-from livekit.agents.tts import TTSCapabilities
+from livekit.agents.tts import TTSCapabilities, APIConnectOptions, DEFAULT_API_CONNECT_OPTIONS
 
 logger = logging.getLogger("sarvam-streaming-tts")
 
 SARVAM_API_KEY = os.environ.get("SARVAM_API_KEY", "")
+
+VALID_SPEAKERS_V3 = {
+    "shubh","ritu","rahul","pooja","simran","kavya","amit","ratan","rohan",
+    "dev","ishita","shreya","manan","sumit","priya","aditya","kabir","neha",
+    "varun","roopa","aayan","ashutosh","advait","amelia","sophia"
+}
 
 
 class SarvamStreamingTTS(tts.TTS):
@@ -50,37 +56,48 @@ class SarvamStreamingTTS(tts.TTS):
         self._api_key         = api_key or SARVAM_API_KEY
 
         if not self._api_key:
-            raise ValueError("SARVAM_API_KEY env var is not set")
-
-        # Validate speaker is compatible with bulbul:v3
-        VALID_SPEAKERS = {
-            "shubh","ritu","rahul","pooja","simran","kavya","amit","ratan","rohan",
-            "dev","ishita","shreya","manan","sumit","priya","aditya","kabir","neha",
-            "varun","roopa","aayan","ashutosh","advait","amelia","sophia"
-        }
-        if self._speaker not in VALID_SPEAKERS:
+            raise ValueError("SARVAM_API_KEY is not set")
+        if self._speaker not in VALID_SPEAKERS_V3:
             raise ValueError(
-                f"Speaker '{self._speaker}' not valid for bulbul:v3. "
-                f"Choose from: {', '.join(sorted(VALID_SPEAKERS))}"
+                f"Speaker '{self._speaker}' invalid. "
+                f"Valid: {', '.join(sorted(VALID_SPEAKERS_V3))}"
             )
 
-    def synthesize(self, text: str) -> "SarvamSynthStream":
+    # ✅ conn_options accepted and passed through — this was the crash
+    def synthesize(
+        self,
+        text: str,
+        *,
+        conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
+    ) -> "SarvamSynthStream":
         return SarvamSynthStream(
             tts_instance=self,
             text=text,
+            conn_options=conn_options,
         )
 
-    def stream(self) -> "SarvamSynthStream":
+    def stream(
+        self,
+        *,
+        conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
+    ) -> "SarvamSynthStream":
         return SarvamSynthStream(
             tts_instance=self,
             text="",
+            conn_options=conn_options,
         )
 
 
 class SarvamSynthStream(tts.SynthesizeStream):
 
-    def __init__(self, *, tts_instance: SarvamStreamingTTS, text: str):
-        super().__init__(tts=tts_instance)
+    def __init__(
+        self,
+        *,
+        tts_instance: SarvamStreamingTTS,
+        text: str,
+        conn_options: APIConnectOptions,
+    ):
+        super().__init__(tts=tts_instance, conn_options=conn_options)  # ✅ pass to parent
         self._tts_instance = tts_instance
         self._text         = text
 
