@@ -27,7 +27,6 @@ from livekit.agents import (
     llm,
 )
 from livekit.plugins import openai, sarvam, silero
-from custom_sarvam_tts import SarvamStreamingTTS
 from typing import Annotated
 
 CONFIG_FILE = "config.json"
@@ -47,6 +46,7 @@ def get_live_config():
         "stt_min_endpointing_delay": config.get("stt_min_endpointing_delay", 0.6),
         "llm_model": config.get("llm_model", "gpt-4o-mini"),
         "tts_voice": config.get("tts_voice", "kavya"),
+        "tts_language": config.get("tts_language", "hi-IN"),
         **config
     }
 
@@ -293,6 +293,7 @@ async def entrypoint(ctx: JobContext):
     delay_setting = live_config.get("stt_min_endpointing_delay", 0.6)
     llm_model = live_config.get("llm_model", "gpt-4o-mini")
     tts_voice = live_config.get("tts_voice", "rohan")
+    tts_language = live_config.get("tts_language", "hi-IN")
 
     # Override OS environment variables if they are set in the UI dashboard
     for key in ["LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "OPENAI_API_KEY", "SARVAM_API_KEY", "CAL_API_KEY", "TELEGRAM_BOT_TOKEN", "SUPABASE_URL", "SUPABASE_KEY"]:
@@ -330,11 +331,10 @@ async def entrypoint(ctx: JobContext):
         llm=openai.LLM(
             model=llm_model,     # Dynamic LLM choice from dashboard
         ),
-        tts=SarvamStreamingTTS(
-            speaker=tts_voice,           # Dynamically set from UI config
-            language="hi-IN",
-            pace=1.1,
-            min_buffer_size=50,
+        tts=sarvam.TTS(
+            target_language_code=tts_language,
+            model="bulbul:v3",
+            speaker=tts_voice,
         ),
         turn_detection="stt",
         min_endpointing_delay=0.15,     # Raised from 0.07 — stops false self-interruptions
