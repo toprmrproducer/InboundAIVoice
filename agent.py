@@ -437,12 +437,16 @@ async def entrypoint(ctx: JobContext):
                 notes=intent["notes"],
             )
             if result.get("success"):
+                # Build short AI summary from transcript
+                short_summary = transcript_text[:300].strip() if 'transcript_text' in dir() else ""
                 notify_booking_confirmed(
                     caller_name=intent["caller_name"],
                     caller_phone=intent["caller_phone"],
                     booking_time_iso=intent["start_time"],
                     booking_id=result.get("booking_id"),
                     notes=intent["notes"],
+                    tts_voice=tts_voice,
+                    ai_summary=short_summary,
                 )
                 logger.info("Post-call booking executed and notification sent.")
                 booking_status_msg = f"Booking Confirmed: {result.get('booking_id')}"
@@ -455,6 +459,8 @@ async def entrypoint(ctx: JobContext):
                 caller_name=agent_tools.caller_name,
                 caller_phone=agent_tools.caller_phone,
                 call_summary="Caller did not schedule an appointment during this call.",
+                tts_voice=tts_voice,
+                duration_seconds=int((datetime.now() - call_start_time).total_seconds()),
             )
 
         # Build Transcript & Save to Supabase

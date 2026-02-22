@@ -2,7 +2,7 @@ import json
 import logging
 import os
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -19,15 +19,17 @@ def read_config():
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, "r") as f:
             config = json.load(f)
-            
+
     def get_val(key, env_key, default=""):
         return config.get(key) if config.get(key) else os.getenv(env_key, default)
-        
+
     return {
-        "agent_instructions": get_val("agent_instructions", "AGENT_INSTRUCTIONS", "Say exactly this phrase without any extra thinking: 'Namaste! Welcome to Daisy's Med Spa. Main aapki kaise madad kar sakti hoon? I can answer questions about our treatments or help you book an appointment.'"),
+        "first_line": get_val("first_line", "FIRST_LINE", "Namaste! Welcome to Daisy's Med Spa. Main aapki kaise madad kar sakti hoon? I can answer questions about our treatments or help you book an appointment."),
+        "agent_instructions": get_val("agent_instructions", "AGENT_INSTRUCTIONS", ""),
         "stt_min_endpointing_delay": float(get_val("stt_min_endpointing_delay", "STT_MIN_ENDPOINTING_DELAY", 0.6)),
         "llm_model": get_val("llm_model", "LLM_MODEL", "gpt-4o-mini"),
         "tts_voice": get_val("tts_voice", "TTS_VOICE", "kavya"),
+        "tts_language": get_val("tts_language", "TTS_LANGUAGE", "hi-IN"),
         "livekit_url": get_val("livekit_url", "LIVEKIT_URL", ""),
         "sip_trunk_id": get_val("sip_trunk_id", "SIP_TRUNK_ID", ""),
         "livekit_api_key": get_val("livekit_api_key", "LIVEKIT_API_KEY", ""),
@@ -44,259 +46,12 @@ def read_config():
     }
 
 def write_config(data):
-    # Merge existing config with new data so we don't overwrite missing keys
     config = read_config()
     config.update(data)
     with open(CONFIG_FILE, "w") as f:
         json.dump(config, f, indent=4)
 
-@app.get("/", response_class=HTMLResponse)
-async def get_dashboard():
-    config = read_config()
-    
-    html_content = f"""
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Med Spa AI Control Panel</title>
-        <script src="https://cdn.tailwindcss.com"></script>
-        <style>
-            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-            body {{ font-family: 'Inter', sans-serif; }}
-            .tab-btn.active {{ border-bottom: 2px solid #3b82f6; color: #3b82f6; }}
-            .tab-content {{ display: none; }}
-            .tab-content.active {{ display: block; }}
-        </style>
-    </head>
-    <body class="bg-gray-50 text-gray-900 min-h-screen">
-        <div class="max-w-4xl mx-auto py-10 px-4 sm:px-6 lg:px-8">
-            <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                <div class="px-6 py-5 border-b border-gray-200">
-                    <h1 class="text-2xl font-bold text-gray-900">✨ AI Concierge Control Panel</h1>
-                    <p class="mt-1 text-sm text-gray-500">Configure your LiveKit Voice Agent seamlessly.</p>
-                </div>
-                
-                <!-- Tabs -->
-                <div class="flex border-b border-gray-200 px-6">
-                    <button class="tab-btn active px-4 py-3 text-sm font-medium text-gray-500 hover:text-gray-700 focus:outline-none" onclick="switchTab('prompting')">🤖 Prompting & Tuning</button>
-                    <button class="tab-btn px-4 py-3 text-sm font-medium text-gray-500 hover:text-gray-700 focus:outline-none" onclick="switchTab('models')">🎙️ Models & Voice</button>
-                    <button class="tab-btn px-4 py-3 text-sm font-medium text-gray-500 hover:text-gray-700 focus:outline-none" onclick="switchTab('credentials')">🔑 API Credentials</button>
-                    <button class="tab-btn px-4 py-3 text-sm font-medium text-gray-500 hover:text-gray-700 focus:outline-none" onclick="switchTab('logs'); loadLogs();">📞 Call Logs</button>
-                </div>
-
-                <div class="p-6">
-                    <!-- Prompting Tab -->
-                    <div id="prompting" class="tab-content active space-y-6">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700">Master System Prompt</label>
-                            <p class="text-xs text-gray-500 mb-2">The AI's personality and instructions. Note: Date and Time context is injected automatically!</p>
-                            <textarea id="agent_instructions" class="w-full h-64 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm">{config.get('agent_instructions', '')}</textarea>
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700">Mic Sensitivity (Endpointing Delay)</label>
-                            <p class="text-xs text-gray-500 mb-2">Seconds the AI waits after you stop speaking to assume you are done. Default: 0.6.</p>
-                            <input type="number" id="stt_min_endpointing_delay" step="0.1" value="{config.get('stt_min_endpointing_delay', 0.6)}" class="w-32 p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
-                        </div>
-                    </div>
-
-                    <!-- Models Tab -->
-                    <div id="models" class="tab-content space-y-6">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700">LLM Brain (OpenAI)</label>
-                            <select id="llm_model" class="mt-1 block w-1/2 pl-3 pr-10 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
-                                <option value="gpt-4o-mini" {'selected' if config.get('llm_model') == 'gpt-4o-mini' else ''}>gpt-4o-mini (Fastest, Default)</option>
-                                <option value="gpt-4o" {'selected' if config.get('llm_model') == 'gpt-4o' else ''}>gpt-4o (Smartest, Slower)</option>
-                                <option value="gpt-3.5-turbo" {'selected' if config.get('llm_model') == 'gpt-3.5-turbo' else ''}>gpt-3.5-turbo</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700">Voice Synthesis (Sarvam bulbul:v3)</label>
-                            <select id="tts_voice" class="mt-1 block w-1/2 pl-3 pr-10 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
-                                <option value="kavya" {'selected' if config.get('tts_voice') == 'kavya' else ''}>Kavya (Fastest Streaming)</option>
-                                <option value="rohan" {'selected' if config.get('tts_voice') == 'rohan' else ''}>Rohan (Male, Balanced)</option>
-                                <option value="priya" {'selected' if config.get('tts_voice') == 'priya' else ''}>Priya (Female)</option>
-                                <option value="shubh" {'selected' if config.get('tts_voice') == 'shubh' else ''}>Shubh (Male)</option>
-                                <option value="shreya" {'selected' if config.get('tts_voice') == 'shreya' else ''}>Shreya (Female)</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    <!-- Credentials Tab -->
-                    <div id="credentials" class="tab-content space-y-6 bg-gray-50 p-4 rounded-lg border border-gray-200">
-                        <p class="text-sm text-gray-600 mb-4">Paste your API keys here. Your code will prioritize these over any hardcoded .env files. Do not share this dashboard publicly.</p>
-                        
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                                <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider">LiveKit URL</label>
-                                <input type="text" id="livekit_url" value="{config.get('livekit_url', '')}" class="mt-1 w-full p-2 border border-gray-300 rounded-lg">
-                            </div>
-                            <div>
-                                <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider">SIP Trunk ID (Outbound)</label>
-                                <input type="text" id="sip_trunk_id" value="{config.get('sip_trunk_id', '')}" class="mt-1 w-full p-2 border border-gray-300 rounded-lg">
-                            </div>
-                            <div>
-                                <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider">LiveKit API Key</label>
-                                <input type="password" id="livekit_api_key" value="{config.get('livekit_api_key', '')}" class="mt-1 w-full p-2 border border-gray-300 rounded-lg">
-                            </div>
-                            <div>
-                                <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider">LiveKit API Secret</label>
-                                <input type="password" id="livekit_api_secret" value="{config.get('livekit_api_secret', '')}" class="mt-1 w-full p-2 border border-gray-300 rounded-lg">
-                            </div>
-                            <div>
-                                <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider">OpenAI API Key</label>
-                                <input type="password" id="openai_api_key" value="{config.get('openai_api_key', '')}" class="mt-1 w-full p-2 border border-gray-300 rounded-lg">
-                            </div>
-                            <div>
-                                <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider">Sarvam API Key</label>
-                                <input type="password" id="sarvam_api_key" value="{config.get('sarvam_api_key', '')}" class="mt-1 w-full p-2 border border-gray-300 rounded-lg">
-                            </div>
-                            <div>
-                                <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider">Cal.com API Key</label>
-                                <input type="password" id="cal_api_key" value="{config.get('cal_api_key', '')}" class="mt-1 w-full p-2 border border-gray-300 rounded-lg">
-                            </div>
-                            <div>
-                                <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider">Cal.com Event Type ID</label>
-                                <input type="text" id="cal_event_type_id" value="{config.get('cal_event_type_id', '')}" class="mt-1 w-full p-2 border border-gray-300 rounded-lg">
-                            </div>
-                            <div>
-                                <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider">Telegram Bot Token</label>
-                                <input type="password" id="telegram_bot_token" value="{config.get('telegram_bot_token', '')}" class="mt-1 w-full p-2 border border-gray-300 rounded-lg">
-                            </div>
-                            <div>
-                                <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider">Telegram Chat ID</label>
-                                <input type="text" id="telegram_chat_id" value="{config.get('telegram_chat_id', '')}" class="mt-1 w-full p-2 border border-gray-300 rounded-lg">
-                            </div>
-                            <div>
-                                <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider">Supabase URL</label>
-                                <input type="text" id="supabase_url" value="{config.get('supabase_url', '')}" class="mt-1 w-full p-2 border border-gray-300 rounded-lg">
-                            </div>
-                            <div>
-                                <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider">Supabase Anon Key</label>
-                                <input type="password" id="supabase_key" value="{config.get('supabase_key', '')}" class="mt-1 w-full p-2 border border-gray-300 rounded-lg">
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Call Logs Tab -->
-                    <div id="logs" class="tab-content space-y-6">
-                        <div class="flex justify-between items-center">
-                            <h2 class="text-lg font-semibold text-gray-900">Recent Calls</h2>
-                            <button onclick="loadLogs()" class="px-3 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded text-sm transition-colors">Refresh</button>
-                        </div>
-                        <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-                            <table class="min-w-full divide-y divide-gray-200">
-                                <thead class="bg-gray-50">
-                                    <tr>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Phone</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Duration</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Transcript</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="logs-table-body" class="bg-white divide-y divide-gray-200 text-sm">
-                                    <!-- Logs injected here -->
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="px-6 py-4 bg-gray-50 border-t border-gray-200 flex items-center justify-between">
-                    <span id="status" class="text-sm font-medium text-green-600 opacity-0 transition-opacity">✅ Configuration saved successfully!</span>
-                    <button onclick="saveConfig()" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium shadow-sm transition-colors focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
-                        Save Configuration
-                    </button>
-                </div>
-            </div>
-        </div>
-
-        <script>
-            function switchTab(tabId) {{
-                document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active', 'text-blue-600'));
-                
-                document.getElementById(tabId).classList.add('active');
-                event.currentTarget.classList.add('active', 'text-blue-600');
-            }}
-
-            async function saveConfig() {{
-                const payload = {{
-                    agent_instructions: document.getElementById('agent_instructions').value,
-                    stt_min_endpointing_delay: parseFloat(document.getElementById('stt_min_endpointing_delay').value),
-                    llm_model: document.getElementById('llm_model').value,
-                    tts_voice: document.getElementById('tts_voice').value,
-                    livekit_url: document.getElementById('livekit_url').value,
-                    livekit_api_key: document.getElementById('livekit_api_key').value,
-                    livekit_api_secret: document.getElementById('livekit_api_secret').value,
-                    openai_api_key: document.getElementById('openai_api_key').value,
-                    sarvam_api_key: document.getElementById('sarvam_api_key').value,
-                    cal_api_key: document.getElementById('cal_api_key').value,
-                    cal_event_type_id: document.getElementById('cal_event_type_id').value,
-                    telegram_bot_token: document.getElementById('telegram_bot_token').value,
-                    telegram_chat_id: document.getElementById('telegram_chat_id').value,
-                    sip_trunk_id: document.getElementById('sip_trunk_id').value,
-                    supabase_url: document.getElementById('supabase_url').value,
-                    supabase_key: document.getElementById('supabase_key').value
-                }};
-                
-                const response = await fetch('/api/config', {{
-                    method: 'POST',
-                    headers: {{'Content-Type': 'application/json'}},
-                    body: JSON.stringify(payload)
-                }});
-                
-                if (response.ok) {{
-                    const statusEl = document.getElementById('status');
-                    statusEl.style.opacity = '1';
-                    setTimeout(() => {{ statusEl.style.opacity = '0'; }}, 3000);
-                }} else {{
-                    alert("Failed to save configuration.");
-                }}
-            }}
-
-            async function loadLogs() {{
-                const tbody = document.getElementById('logs-table-body');
-                tbody.innerHTML = '<tr><td colspan="5" class="px-6 py-4 text-center text-gray-500">Loading call logs...</td></tr>';
-                
-                try {{
-                    const response = await fetch('/api/logs');
-                    const logs = await response.json();
-                    
-                    if (!logs || logs.length === 0) {{
-                        tbody.innerHTML = '<tr><td colspan="5" class="px-6 py-4 text-center text-gray-500">No call logs found. (Check Supabase credentials and make a call!)</td></tr>';
-                        return;
-                    }}
-                    
-                    tbody.innerHTML = logs.map(log => `
-                        <tr>
-                            <td class="px-6 py-4 whitespace-nowrap text-gray-500">${{new Date(log.created_at).toLocaleString()}}</td>
-                            <td class="px-6 py-4 whitespace-nowrap font-medium text-gray-900">${{log.phone_number || 'Unknown'}}</td>
-                            <td class="px-6 py-4 whitespace-nowrap text-gray-500">${{log.duration_seconds}}s</td>
-                            <td class="px-6 py-4 whitespace-nowrap">
-                                <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${{log.summary.includes('Confirmed') ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}}">
-                                    ${{log.summary || 'Ended'}}
-                                </span>
-                            </td>
-                            <td class="px-6 py-4">
-                                <details class="cursor-pointer text-blue-600 hover:text-blue-800">
-                                    <summary class="focus:outline-none">View Transcript</summary>
-                                    <div class="mt-2 p-3 bg-gray-50 rounded-md text-xs text-gray-700 whitespace-pre-wrap font-mono border border-gray-200">${{log.transcript || 'No transcript available.'}}</div>
-                                </details>
-                            </td>
-                        </tr>
-                    `).join('');
-                }} catch (e) {{
-                    tbody.innerHTML = '<tr><td colspan="5" class="px-6 py-4 text-center text-red-500">Error loading logs. Have you configured Supabase API keys?</td></tr>';
-                }}
-            }}
-        </script>
-    </body>
-    </html>
-    """
-    return HTMLResponse(content=html_content)
+# ── API Endpoints ──────────────────────────────────────────────────────────────
 
 @app.get("/api/config")
 async def api_get_config():
@@ -306,7 +61,7 @@ async def api_get_config():
 async def api_post_config(request: Request):
     data = await request.json()
     write_config(data)
-    logger.info("Configuration updated via UI dynamically.")
+    logger.info("Configuration updated via UI.")
     return {"status": "success"}
 
 @app.get("/api/logs")
@@ -314,7 +69,6 @@ async def api_get_logs():
     config = read_config()
     os.environ["SUPABASE_URL"] = config.get("supabase_url", "")
     os.environ["SUPABASE_KEY"] = config.get("supabase_key", "")
-    
     import db
     try:
         logs = db.fetch_call_logs(limit=50)
@@ -323,7 +77,647 @@ async def api_get_logs():
         logger.error(f"Error fetching logs: {e}")
         return []
 
+@app.get("/api/logs/{log_id}/transcript")
+async def api_get_transcript(log_id: str):
+    config = read_config()
+    os.environ["SUPABASE_URL"] = config.get("supabase_url", "")
+    os.environ["SUPABASE_KEY"] = config.get("supabase_key", "")
+    import db
+    try:
+        from supabase import create_client
+        supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
+        res = supabase.table("call_logs").select("*").eq("id", log_id).single().execute()
+        data = res.data
+        text = f"Call Log — {data.get('created_at', '')}\n"
+        text += f"Phone: {data.get('phone_number', 'Unknown')}\n"
+        text += f"Duration: {data.get('duration_seconds', 0)}s\n"
+        text += f"Summary: {data.get('summary', '')}\n\n"
+        text += "--- TRANSCRIPT ---\n"
+        text += data.get("transcript", "No transcript available.")
+        return PlainTextResponse(content=text, media_type="text/plain",
+                                 headers={"Content-Disposition": f"attachment; filename=transcript_{log_id}.txt"})
+    except Exception as e:
+        return PlainTextResponse(content=f"Error: {e}", status_code=500)
+
+@app.get("/api/bookings")
+async def api_get_bookings():
+    config = read_config()
+    os.environ["SUPABASE_URL"] = config.get("supabase_url", "")
+    os.environ["SUPABASE_KEY"] = config.get("supabase_key", "")
+    import db
+    try:
+        return db.fetch_bookings()
+    except Exception as e:
+        logger.error(f"Error fetching bookings: {e}")
+        return []
+
+@app.get("/api/stats")
+async def api_get_stats():
+    config = read_config()
+    os.environ["SUPABASE_URL"] = config.get("supabase_url", "")
+    os.environ["SUPABASE_KEY"] = config.get("supabase_key", "")
+    import db
+    try:
+        return db.fetch_stats()
+    except Exception as e:
+        logger.error(f"Error fetching stats: {e}")
+        return {"total_calls": 0, "total_bookings": 0, "avg_duration": 0, "booking_rate": 0}
+
+# ── Main Dashboard HTML ────────────────────────────────────────────────────────
+
+@app.get("/", response_class=HTMLResponse)
+async def get_dashboard():
+    config = read_config()
+
+    def sel(key, val):
+        return "selected" if config.get(key) == val else ""
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Voice Agent — Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    :root {{
+      --bg: #0f1117;
+      --sidebar: #161b27;
+      --card: #1c2333;
+      --border: #2a3448;
+      --accent: #6c63ff;
+      --accent-glow: rgba(108,99,255,0.18);
+      --text: #e2e8f0;
+      --muted: #8892a4;
+      --green: #22c55e;
+      --red: #ef4444;
+      --yellow: #f59e0b;
+      --sidebar-w: 240px;
+    }}
+    body {{ font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); display: flex; height: 100vh; overflow: hidden; }}
+
+    /* ── Sidebar ── */
+    #sidebar {{
+      width: var(--sidebar-w); min-width: var(--sidebar-w);
+      background: var(--sidebar); border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; padding: 24px 0;
+      position: relative; z-index: 10;
+    }}
+    .sidebar-brand {{
+      padding: 0 20px 24px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 10px;
+    }}
+    .sidebar-brand .logo {{
+      width: 32px; height: 32px; background: var(--accent);
+      border-radius: 8px; display: flex; align-items: center; justify-content: center;
+      font-size: 16px;
+    }}
+    .sidebar-brand .brand-text {{ font-weight: 700; font-size: 14px; line-height: 1.2; }}
+    .sidebar-brand .brand-sub {{ font-size: 10px; color: var(--muted); }}
+    .sidebar-nav {{ padding: 16px 0; flex: 1; }}
+    .nav-section {{ padding: 8px 16px 4px; font-size: 10px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }}
+    .nav-item {{
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 20px; cursor: pointer; font-size: 13.5px; font-weight: 500;
+      color: var(--muted); border-left: 3px solid transparent;
+      transition: all 0.15s; user-select: none;
+    }}
+    .nav-item:hover {{ color: var(--text); background: rgba(255,255,255,0.04); }}
+    .nav-item.active {{ color: var(--accent); border-left-color: var(--accent); background: var(--accent-glow); }}
+    .nav-item .icon {{ font-size: 16px; width: 20px; text-align: center; }}
+    .sidebar-footer {{
+      padding: 16px 20px;
+      border-top: 1px solid var(--border);
+      font-size: 11px; color: var(--muted);
+    }}
+    .status-dot {{
+      display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+      background: var(--green); margin-right: 6px; box-shadow: 0 0 6px var(--green);
+    }}
+
+    /* ── Main ── */
+    #main {{ flex: 1; overflow-y: auto; background: var(--bg); }}
+    .page {{ display: none; padding: 32px 36px; min-height: 100%; }}
+    .page.active {{ display: block; }}
+    .page-header {{ margin-bottom: 28px; }}
+    .page-title {{ font-size: 22px; font-weight: 700; }}
+    .page-sub {{ font-size: 13px; color: var(--muted); margin-top: 4px; }}
+
+    /* ── Cards ── */
+    .card {{
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 12px; padding: 20px;
+    }}
+    .stat-grid {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 28px; }}
+    .stat-card {{ background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }}
+    .stat-label {{ font-size: 11px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }}
+    .stat-value {{ font-size: 28px; font-weight: 700; margin-top: 8px; }}
+    .stat-sub {{ font-size: 12px; color: var(--muted); margin-top: 4px; }}
+
+    /* ── Table ── */
+    .table-wrap {{ background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }}
+    table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
+    thead th {{ padding: 12px 16px; text-align: left; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; background: rgba(255,255,255,0.03); border-bottom: 1px solid var(--border); }}
+    tbody td {{ padding: 13px 16px; border-bottom: 1px solid rgba(255,255,255,0.04); vertical-align: middle; }}
+    tbody tr:last-child td {{ border-bottom: none; }}
+    tbody tr:hover {{ background: rgba(255,255,255,0.025); }}
+    .badge {{ display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; }}
+    .badge-green {{ background: rgba(34,197,94,0.12); color: var(--green); }}
+    .badge-gray {{ background: rgba(255,255,255,0.07); color: var(--muted); }}
+    .badge-yellow {{ background: rgba(245,158,11,0.12); color: var(--yellow); }}
+
+    /* ── Forms ── */
+    label {{ display: block; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }}
+    input[type=text], input[type=password], input[type=number], select, textarea {{
+      width: 100%; background: var(--bg); border: 1px solid var(--border);
+      border-radius: 8px; padding: 10px 12px; color: var(--text); font-family: inherit;
+      font-size: 13.5px; outline: none; transition: border-color 0.15s;
+    }}
+    input:focus, select:focus, textarea:focus {{ border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }}
+    textarea {{ font-family: 'JetBrains Mono', 'Fira Code', monospace; resize: vertical; }}
+    .form-group {{ margin-bottom: 20px; }}
+    .form-row {{ display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }}
+    .hint {{ font-size: 11.5px; color: var(--muted); margin-top: 5px; }}
+    .section-card {{ background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin-bottom: 20px; }}
+    .section-title {{ font-size: 14px; font-weight: 600; margin-bottom: 18px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }}
+
+    /* ── Buttons ── */
+    .btn {{ display: inline-flex; align-items: center; gap: 6px; padding: 9px 18px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; border: none; transition: all 0.15s; }}
+    .btn-primary {{ background: var(--accent); color: #fff; }}
+    .btn-primary:hover {{ background: #5a52e0; box-shadow: 0 0 16px var(--accent-glow); }}
+    .btn-ghost {{ background: transparent; border: 1px solid var(--border); color: var(--muted); }}
+    .btn-ghost:hover {{ border-color: var(--accent); color: var(--accent); }}
+    .btn-sm {{ padding: 5px 12px; font-size: 12px; }}
+    .save-bar {{
+      position: sticky; bottom: 0; left: 0; right: 0;
+      background: rgba(22,27,39,0.95); backdrop-filter: blur(12px);
+      border-top: 1px solid var(--border);
+      padding: 14px 36px; display: flex; align-items: center; justify-content: space-between; z-index: 20;
+    }}
+    .save-status {{ font-size: 13px; font-weight: 500; color: var(--green); opacity: 0; transition: opacity 0.3s; }}
+
+    /* ── Calendar ── */
+    .cal-header {{ display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }}
+    .cal-grid {{ display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }}
+    .cal-day-name {{ text-align: center; font-size: 11px; color: var(--muted); font-weight: 600; padding: 6px 0; text-transform: uppercase; }}
+    .cal-cell {{
+      min-height: 68px; background: var(--card); border: 1px solid var(--border);
+      border-radius: 8px; padding: 8px; cursor: pointer; transition: all 0.12s; position: relative;
+    }}
+    .cal-cell:hover {{ border-color: var(--accent); background: var(--accent-glow); }}
+    .cal-cell.today {{ border-color: var(--accent); }}
+    .cal-cell.other-month {{ opacity: 0.35; }}
+    .cal-num {{ font-size: 13px; font-weight: 600; }}
+    .cal-dot {{ width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin-top: 4px; }}
+    .cal-booking-count {{ font-size: 10px; color: var(--accent); font-weight: 600; margin-top: 2px; }}
+    .day-panel {{ background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-top: 20px; display: none; }}
+    .day-panel.show {{ display: block; }}
+    .booking-item {{ padding: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; }}
+    .booking-item:last-child {{ margin-bottom: 0; }}
+  </style>
+</head>
+<body>
+
+<!-- ── Sidebar ── -->
+<nav id="sidebar">
+  <div class="sidebar-brand">
+    <div class="logo">🎙️</div>
+    <div>
+      <div class="brand-text">Voice Agent</div>
+      <div class="brand-sub">Med Spa AI</div>
+    </div>
+  </div>
+  <div class="sidebar-nav">
+    <div class="nav-section">Overview</div>
+    <div class="nav-item active" onclick="goTo('dashboard', this)"><span class="icon">📊</span> Dashboard</div>
+    <div class="nav-item" onclick="goTo('calendar', this); loadCalendar();"><span class="icon">📅</span> Calendar</div>
+    <div class="nav-section" style="margin-top:12px;">Configuration</div>
+    <div class="nav-item" onclick="goTo('agent', this)"><span class="icon">🤖</span> Agent Settings</div>
+    <div class="nav-item" onclick="goTo('models', this)"><span class="icon">🎙️</span> Models & Voice</div>
+    <div class="nav-item" onclick="goTo('credentials', this)"><span class="icon">🔑</span> API Credentials</div>
+    <div class="nav-section" style="margin-top:12px;">Data</div>
+    <div class="nav-item" onclick="goTo('logs', this); loadLogs();"><span class="icon">📞</span> Call Logs</div>
+  </div>
+  <div class="sidebar-footer">
+    <span class="status-dot"></span>Agent Online
+  </div>
+</nav>
+
+<!-- ── Main Content ── -->
+<div id="main">
+
+  <!-- ── Dashboard ── -->
+  <div id="page-dashboard" class="page active">
+    <div class="page-header">
+      <div class="page-title">Dashboard</div>
+      <div class="page-sub">Real-time overview of your AI voice agent performance</div>
+    </div>
+    <div class="stat-grid" id="stat-grid">
+      <div class="stat-card"><div class="stat-label">Total Calls</div><div class="stat-value" id="stat-calls">—</div><div class="stat-sub">All time</div></div>
+      <div class="stat-card"><div class="stat-label">Bookings Made</div><div class="stat-value" id="stat-bookings">—</div><div class="stat-sub">Confirmed appointments</div></div>
+      <div class="stat-card"><div class="stat-label">Avg Duration</div><div class="stat-value" id="stat-duration">—</div><div class="stat-sub">Seconds per call</div></div>
+      <div class="stat-card"><div class="stat-label">Booking Rate</div><div class="stat-value" id="stat-rate">—</div><div class="stat-sub">Calls that converted</div></div>
+    </div>
+    <div class="section-card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+        <div class="section-title" style="border:none;padding:0;margin:0;">Recent Calls</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadDashboard()">↻ Refresh</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Date</th><th>Phone</th><th>Duration</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody id="dash-table-body"><tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted);">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Calendar ── -->
+  <div id="page-calendar" class="page">
+    <div class="page-header">
+      <div class="page-title">Booking Calendar</div>
+      <div class="page-sub">View confirmed appointments by date</div>
+    </div>
+    <div class="section-card">
+      <div class="cal-header">
+        <button class="btn btn-ghost btn-sm" onclick="changeMonth(-1)">← Prev</button>
+        <div style="font-size:16px;font-weight:700;" id="cal-month-label">Month Year</div>
+        <button class="btn btn-ghost btn-sm" onclick="changeMonth(1)">Next →</button>
+      </div>
+      <div class="cal-grid" id="cal-grid"></div>
+      <div class="day-panel" id="day-panel">
+        <div style="font-size:14px;font-weight:700;margin-bottom:12px;" id="day-panel-title">Selected Day</div>
+        <div id="day-panel-body"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Agent Settings ── -->
+  <div id="page-agent" class="page">
+    <div class="page-header">
+      <div class="page-title">Agent Settings</div>
+      <div class="page-sub">Configure AI personality, opening line, and sensitivity</div>
+    </div>
+    <div class="section-card">
+      <div class="section-title">Opening Greeting</div>
+      <div class="form-group">
+        <label>First Line (What the agent says when a call connects)</label>
+        <input type="text" id="first_line" value="{config.get('first_line', '')}" placeholder="Namaste! Welcome to Daisy's Med Spa...">
+        <div class="hint">This is the very first thing the agent says. Keep it concise and warm.</div>
+      </div>
+    </div>
+    <div class="section-card">
+      <div class="section-title">System Prompt</div>
+      <div class="form-group">
+        <label>Master System Prompt</label>
+        <textarea id="agent_instructions" rows="16" placeholder="Enter the AI's full personality and instructions...">{config.get('agent_instructions', '')}</textarea>
+        <div class="hint">Date and time context are injected automatically. Do not hardcode today's date.</div>
+      </div>
+    </div>
+    <div class="section-card">
+      <div class="section-title">Listening Sensitivity</div>
+      <div class="form-group" style="max-width:220px;">
+        <label>Endpointing Delay (seconds)</label>
+        <input type="number" id="stt_min_endpointing_delay" step="0.05" min="0.1" max="3.0" value="{config.get('stt_min_endpointing_delay', 0.6)}">
+        <div class="hint">Seconds the AI waits after silence before responding. Default: 0.6</div>
+      </div>
+    </div>
+    <div class="save-bar">
+      <span class="save-status" id="save-status-agent">✅ Saved!</span>
+      <button class="btn btn-primary" onclick="saveConfig('agent')">💾 Save Agent Settings</button>
+    </div>
+  </div>
+
+  <!-- ── Models & Voice ── -->
+  <div id="page-models" class="page">
+    <div class="page-header">
+      <div class="page-title">Models & Voice</div>
+      <div class="page-sub">Select the LLM brain and TTS voice persona</div>
+    </div>
+    <div class="section-card">
+      <div class="section-title">Language Model (LLM)</div>
+      <div class="form-group" style="max-width:360px;">
+        <label>OpenAI Model</label>
+        <select id="llm_model">
+          <option value="gpt-4o-mini" {sel('llm_model','gpt-4o-mini')}>gpt-4o-mini — Fastest, Default</option>
+          <option value="gpt-4o" {sel('llm_model','gpt-4o')}>gpt-4o — Smartest, Slower</option>
+          <option value="gpt-4-turbo" {sel('llm_model','gpt-4-turbo')}>gpt-4-turbo</option>
+          <option value="gpt-3.5-turbo" {sel('llm_model','gpt-3.5-turbo')}>gpt-3.5-turbo — Cheapest</option>
+        </select>
+      </div>
+    </div>
+    <div class="section-card">
+      <div class="section-title">Voice Synthesis (Sarvam bulbul:v3)</div>
+      <div class="form-row" style="max-width:720px;">
+        <div class="form-group">
+          <label>Speaker Voice</label>
+          <select id="tts_voice">
+            <option value="kavya" {sel('tts_voice','kavya')}>Kavya — Female, Friendly</option>
+            <option value="rohan" {sel('tts_voice','rohan')}>Rohan — Male, Balanced</option>
+            <option value="priya" {sel('tts_voice','priya')}>Priya — Female, Warm</option>
+            <option value="shubh" {sel('tts_voice','shubh')}>Shubh — Male, Formal</option>
+            <option value="shreya" {sel('tts_voice','shreya')}>Shreya — Female, Clear</option>
+            <option value="ritu" {sel('tts_voice','ritu')}>Ritu — Female, Soft</option>
+            <option value="rahul" {sel('tts_voice','rahul')}>Rahul — Male, Deep</option>
+            <option value="amit" {sel('tts_voice','amit')}>Amit — Male, Casual</option>
+            <option value="neha" {sel('tts_voice','neha')}>Neha — Female, Energetic</option>
+            <option value="dev" {sel('tts_voice','dev')}>Dev — Male, Professional</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Language</label>
+          <select id="tts_language">
+            <option value="hi-IN" {sel('tts_language','hi-IN')}>Hindi (hi-IN)</option>
+            <option value="en-IN" {sel('tts_language','en-IN')}>English India (en-IN)</option>
+            <option value="ta-IN" {sel('tts_language','ta-IN')}>Tamil (ta-IN)</option>
+            <option value="te-IN" {sel('tts_language','te-IN')}>Telugu (te-IN)</option>
+            <option value="kn-IN" {sel('tts_language','kn-IN')}>Kannada (kn-IN)</option>
+            <option value="ml-IN" {sel('tts_language','ml-IN')}>Malayalam (ml-IN)</option>
+            <option value="mr-IN" {sel('tts_language','mr-IN')}>Marathi (mr-IN)</option>
+            <option value="gu-IN" {sel('tts_language','gu-IN')}>Gujarati (gu-IN)</option>
+            <option value="bn-IN" {sel('tts_language','bn-IN')}>Bengali (bn-IN)</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div class="save-bar">
+      <span class="save-status" id="save-status-models">✅ Saved!</span>
+      <button class="btn btn-primary" onclick="saveConfig('models')">💾 Save Model Settings</button>
+    </div>
+  </div>
+
+  <!-- ── API Credentials ── -->
+  <div id="page-credentials" class="page">
+    <div class="page-header">
+      <div class="page-title">API Credentials</div>
+      <div class="page-sub">Credentials here override .env values at runtime. Never share this page.</div>
+    </div>
+    <div class="section-card">
+      <div class="section-title">LiveKit</div>
+      <div class="form-row">
+        <div class="form-group"><label>LiveKit URL</label><input type="text" id="livekit_url" value="{config.get('livekit_url', '')}"></div>
+        <div class="form-group"><label>SIP Trunk ID</label><input type="text" id="sip_trunk_id" value="{config.get('sip_trunk_id', '')}"></div>
+        <div class="form-group"><label>API Key</label><input type="password" id="livekit_api_key" value="{config.get('livekit_api_key', '')}"></div>
+        <div class="form-group"><label>API Secret</label><input type="password" id="livekit_api_secret" value="{config.get('livekit_api_secret', '')}"></div>
+      </div>
+    </div>
+    <div class="section-card">
+      <div class="section-title">AI Providers</div>
+      <div class="form-row">
+        <div class="form-group"><label>OpenAI API Key</label><input type="password" id="openai_api_key" value="{config.get('openai_api_key', '')}"></div>
+        <div class="form-group"><label>Sarvam API Key</label><input type="password" id="sarvam_api_key" value="{config.get('sarvam_api_key', '')}"></div>
+      </div>
+    </div>
+    <div class="section-card">
+      <div class="section-title">Integrations</div>
+      <div class="form-row">
+        <div class="form-group"><label>Cal.com API Key</label><input type="password" id="cal_api_key" value="{config.get('cal_api_key', '')}"></div>
+        <div class="form-group"><label>Cal.com Event Type ID</label><input type="text" id="cal_event_type_id" value="{config.get('cal_event_type_id', '')}"></div>
+        <div class="form-group"><label>Telegram Bot Token</label><input type="password" id="telegram_bot_token" value="{config.get('telegram_bot_token', '')}"></div>
+        <div class="form-group"><label>Telegram Chat ID</label><input type="text" id="telegram_chat_id" value="{config.get('telegram_chat_id', '')}"></div>
+        <div class="form-group"><label>Supabase URL</label><input type="text" id="supabase_url" value="{config.get('supabase_url', '')}"></div>
+        <div class="form-group"><label>Supabase Anon Key</label><input type="password" id="supabase_key" value="{config.get('supabase_key', '')}"></div>
+      </div>
+    </div>
+    <div class="save-bar">
+      <span class="save-status" id="save-status-credentials">✅ Saved!</span>
+      <button class="btn btn-primary" onclick="saveConfig('credentials')">💾 Save Credentials</button>
+    </div>
+  </div>
+
+  <!-- ── Call Logs ── -->
+  <div id="page-logs" class="page">
+    <div class="page-header">
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <div>
+          <div class="page-title">Call Logs</div>
+          <div class="page-sub">Full history of all incoming calls and transcripts</div>
+        </div>
+        <button class="btn btn-ghost" onclick="loadLogs()">↻ Refresh</button>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Date & Time</th>
+            <th>Phone</th>
+            <th>Duration</th>
+            <th>Status</th>
+            <th>Summary</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="logs-table-body"><tr><td colspan="6" style="text-align:center;padding:32px;color:var(--muted);">Click Refresh to load call logs</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+</div><!-- /main -->
+
+<script>
+// ── Navigation ──────────────────────────────────────────────────────────────
+function goTo(pageId, el) {{
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('page-' + pageId).classList.add('active');
+  el.classList.add('active');
+}}
+
+// ── Stats & Dashboard ───────────────────────────────────────────────────────
+async function loadDashboard() {{
+  try {{
+    const [stats, logs] = await Promise.all([
+      fetch('/api/stats').then(r => r.json()),
+      fetch('/api/logs').then(r => r.json())
+    ]);
+    document.getElementById('stat-calls').textContent = stats.total_calls ?? '—';
+    document.getElementById('stat-bookings').textContent = stats.total_bookings ?? '—';
+    document.getElementById('stat-duration').textContent = stats.avg_duration ? stats.avg_duration + 's' : '—';
+    document.getElementById('stat-rate').textContent = stats.booking_rate ? stats.booking_rate + '%' : '—';
+
+    const tbody = document.getElementById('dash-table-body');
+    if (!logs || logs.length === 0) {{
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted);">No calls yet. Make a test call!</td></tr>';
+      return;
+    }}
+    tbody.innerHTML = logs.slice(0, 10).map(log => `
+      <tr>
+        <td style="color:var(--muted)">${{new Date(log.created_at).toLocaleString()}}</td>
+        <td style="font-weight:600">${{log.phone_number || 'Unknown'}}</td>
+        <td>${{log.duration_seconds || 0}}s</td>
+        <td>${{badgeFor(log.summary)}}</td>
+        <td>
+          ${{log.id ? `<a style="color:var(--accent);font-size:12px;text-decoration:none;" href="/api/logs/${{log.id}}/transcript" download="transcript_${{log.id}}.txt">⬇ Download</a>` : ''}}
+        </td>
+      </tr>`).join('');
+  }} catch(e) {{
+    document.getElementById('dash-table-body').innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted);">Could not load data — check Supabase credentials.</td></tr>';
+  }}
+}}
+
+function badgeFor(summary) {{
+  if (!summary) return '<span class="badge badge-gray">Ended</span>';
+  if (summary.toLowerCase().includes('confirm')) return '<span class="badge badge-green">✓ Booked</span>';
+  if (summary.toLowerCase().includes('cancel')) return '<span class="badge badge-yellow">✗ Cancelled</span>';
+  return '<span class="badge badge-gray">Completed</span>';
+}}
+
+// ── Call Logs ───────────────────────────────────────────────────────────────
+async function loadLogs() {{
+  const tbody = document.getElementById('logs-table-body');
+  tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted);">Loading...</td></tr>';
+  try {{
+    const logs = await fetch('/api/logs').then(r => r.json());
+    if (!logs || logs.length === 0) {{
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted);">No call logs found.</td></tr>';
+      return;
+    }}
+    tbody.innerHTML = logs.map(log => `
+      <tr>
+        <td style="color:var(--muted);white-space:nowrap">${{new Date(log.created_at).toLocaleString()}}</td>
+        <td style="font-weight:600">${{log.phone_number || 'Unknown'}}</td>
+        <td>${{log.duration_seconds || 0}}s</td>
+        <td>${{badgeFor(log.summary)}}</td>
+        <td style="color:var(--muted);font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${{log.summary || ''}}">${{log.summary || '—'}}</td>
+        <td>
+          ${{log.id ? `<a class="btn btn-ghost btn-sm" style="text-decoration:none;" href="/api/logs/${{log.id}}/transcript" download="transcript_${{log.id}}.txt">⬇ Transcript</a>` : '—'}}
+        </td>
+      </tr>`).join('');
+  }} catch(e) {{
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:#ef4444;">Error loading logs. Check Supabase credentials.</td></tr>';
+  }}
+}}
+
+// ── Calendar ────────────────────────────────────────────────────────────────
+let calYear = new Date().getFullYear();
+let calMonth = new Date().getMonth();
+let allBookings = [];
+
+async function loadCalendar() {{
+  try {{ allBookings = await fetch('/api/bookings').then(r => r.json()); }} catch(e) {{ allBookings = []; }}
+  renderCalendar();
+}}
+
+function changeMonth(dir) {{ calMonth += dir; if (calMonth > 11) {{ calMonth = 0; calYear++; }} else if (calMonth < 0) {{ calMonth = 11; calYear--; }} renderCalendar(); }}
+
+function renderCalendar() {{
+  const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  document.getElementById('cal-month-label').textContent = `${{months[calMonth]}} ${{calYear}}`;
+  const grid = document.getElementById('cal-grid');
+  const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const today = new Date();
+
+  // Build booking map by date string YYYY-MM-DD
+  const bookMap = {{}};
+  allBookings.forEach(b => {{
+    const d = b.created_at ? b.created_at.slice(0,10) : null;
+    if (d) {{ bookMap[d] = bookMap[d] || []; bookMap[d].push(b); }}
+  }});
+
+  let html = days.map(d => `<div class="cal-day-name">${{d}}</div>`).join('');
+
+  const first = new Date(calYear, calMonth, 1);
+  const last = new Date(calYear, calMonth + 1, 0);
+  const startPad = first.getDay();
+
+  // Prev month padding
+  for (let i = 0; i < startPad; i++) {{
+    const d = new Date(calYear, calMonth, -startPad + i + 1);
+    html += `<div class="cal-cell other-month"><div class="cal-num">${{d.getDate()}}</div></div>`;
+  }}
+
+  for (let day = 1; day <= last.getDate(); day++) {{
+    const dateStr = `${{calYear}}-${{String(calMonth+1).padStart(2,'0')}}-${{String(day).padStart(2,'0')}}`;
+    const bks = bookMap[dateStr] || [];
+    const isToday = today.getFullYear()===calYear && today.getMonth()===calMonth && today.getDate()===day;
+    html += `<div class="cal-cell${{isToday?' today':''}}" onclick="showDay('${{dateStr}}', ${{JSON.stringify(bks).replace(/'/g,"&apos;")}})">
+      <div class="cal-num">${{day}}</div>
+      ${{bks.length ? `<div class="cal-dot"></div><div class="cal-booking-count">${{bks.length}} booking${{bks.length>1?'s':''}}</div>` : ''}}
+    </div>`;
+  }}
+
+  // Next month padding
+  const endPad = 6 - last.getDay();
+  for (let i = 1; i <= endPad; i++) {{
+    html += `<div class="cal-cell other-month"><div class="cal-num">${{i}}</div></div>`;
+  }}
+
+  grid.innerHTML = html;
+  document.getElementById('day-panel').classList.remove('show');
+}}
+
+function showDay(dateStr, bookings) {{
+  const panel = document.getElementById('day-panel');
+  document.getElementById('day-panel-title').textContent = `Bookings on ${{dateStr}}`;
+  if (!bookings || bookings.length === 0) {{
+    document.getElementById('day-panel-body').innerHTML = '<div style="color:var(--muted);font-size:13px;">No bookings on this day.</div>';
+  }} else {{
+    document.getElementById('day-panel-body').innerHTML = bookings.map(b => `
+      <div class="booking-item">
+        <div style="font-weight:600;font-size:13px;">📞 ${{b.phone_number || 'Unknown'}}</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:4px;">${{b.summary || ''}}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px;">${{new Date(b.created_at).toLocaleTimeString()}}</div>
+      </div>`).join('');
+  }}
+  panel.classList.add('show');
+}}
+
+// ── Save Config ─────────────────────────────────────────────────────────────
+async function saveConfig(section) {{
+  const get = id => {{ const el = document.getElementById(id); return el ? el.value : null; }};
+
+  const payload = {{}};
+
+  if (section === 'agent') {{
+    Object.assign(payload, {{
+      first_line: get('first_line'),
+      agent_instructions: get('agent_instructions'),
+      stt_min_endpointing_delay: parseFloat(get('stt_min_endpointing_delay')),
+    }});
+  }} else if (section === 'models') {{
+    Object.assign(payload, {{
+      llm_model: get('llm_model'),
+      tts_voice: get('tts_voice'),
+      tts_language: get('tts_language'),
+    }});
+  }} else if (section === 'credentials') {{
+    Object.assign(payload, {{
+      livekit_url: get('livekit_url'), sip_trunk_id: get('sip_trunk_id'),
+      livekit_api_key: get('livekit_api_key'), livekit_api_secret: get('livekit_api_secret'),
+      openai_api_key: get('openai_api_key'), sarvam_api_key: get('sarvam_api_key'),
+      cal_api_key: get('cal_api_key'), cal_event_type_id: get('cal_event_type_id'),
+      telegram_bot_token: get('telegram_bot_token'), telegram_chat_id: get('telegram_chat_id'),
+      supabase_url: get('supabase_url'), supabase_key: get('supabase_key'),
+    }});
+  }}
+
+  const res = await fetch('/api/config', {{
+    method: 'POST', headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify(payload)
+  }});
+
+  const statusEl = document.getElementById('save-status-' + section);
+  if (res.ok) {{
+    statusEl.style.opacity = '1';
+    setTimeout(() => {{ statusEl.style.opacity = '0'; }}, 2500);
+  }} else {{
+    alert('Failed to save. Check server logs.');
+  }}
+}}
+
+// ── Boot ────────────────────────────────────────────────────────────────────
+loadDashboard();
+</script>
+</body>
+</html>"""
+
+    return HTMLResponse(content=html)
+
+
 if __name__ == "__main__":
     import uvicorn
-    # Use allow_reuse_address or ignore the process block for local re-runs
     uvicorn.run("ui_server:app", host="0.0.0.0", port=8000, reload=True)

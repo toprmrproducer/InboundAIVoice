@@ -46,6 +46,8 @@ def notify_booking_confirmed(
     booking_time_iso: str,
     booking_id: str,
     notes: str = "",
+    tts_voice: str = "",
+    ai_summary: str = "",
 ) -> bool:
     """
     Sends a rich, formatted Telegram message when a booking is confirmed.
@@ -59,13 +61,15 @@ def notify_booking_confirmed(
     message = (
         f"✅ *New Booking Confirmed!*\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"👤 *Name:*      {caller_name}\n"
-        f"📞 *Phone:*     `{caller_phone}`\n"
-        f"📅 *Time:*      {readable}\n"
-        f"🔖 *Booking ID:* `{booking_id}`\n"
-        f"📝 *Notes:*     {notes or '—'}\n"
+        f"👤 *Name:*        {caller_name}\n"
+        f"📞 *Phone:*       `{caller_phone}`\n"
+        f"📅 *Time:*        {readable}\n"
+        f"🔖 *Booking ID:*  `{booking_id}`\n"
+        f"📝 *Notes:*       {notes or '—'}\n"
+        f"🎙️ *Voice Model:* {tts_voice or '—'}\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"_Booked via RapidXAI Voice Agent_ 🤖"
+        + (f"💬 *AI Summary:*\n_{ai_summary}_\n\n" if ai_summary else "")
+        + f"_Booked via RapidXAI Voice Agent_ 🤖"
     )
     return send_telegram(message)
 
@@ -96,19 +100,23 @@ def notify_call_no_booking(
     caller_name: str,
     caller_phone: str,
     call_summary: str = "",
+    tts_voice: str = "",
+    ai_summary: str = "",
+    duration_seconds: int = 0,
 ) -> bool:
     """
     Fires when a call ends WITHOUT any booking being made.
-    Useful for follow-up — you know someone called but didn't commit.
     """
     message = (
         f"📵 *Call Ended — No Booking*\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"👤 *Name:*    {caller_name or 'Unknown'}\n"
-        f"📞 *Phone:*   `{caller_phone}`\n"
-        f"💬 *Summary:* {call_summary or 'Caller did not schedule an appointment.'}\n"
+        f"👤 *Name:*        {caller_name or 'Unknown'}\n"
+        f"📞 *Phone:*       `{caller_phone}`\n"
+        f"⏱️ *Duration:*    {duration_seconds}s\n"
+        f"🎙️ *Voice Model:* {tts_voice or '—'}\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"_Consider a manual follow-up call_ 📲\n"
+        + (f"💬 *AI Summary:*\n_{ai_summary or call_summary or 'Caller did not schedule.'}_\n\n")
+        + f"_Consider a manual follow-up call_ 📲\n"
         f"_RapidXAI Voice Agent_ 🤖"
     )
     return send_telegram(message)
