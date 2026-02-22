@@ -12,6 +12,10 @@ from dotenv import load_dotenv
 # Fix for macOS SSL certificate verification
 os.environ["SSL_CERT_FILE"] = certifi.where()
 
+logging.getLogger("hpack").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+
 from livekit import api
 from livekit.agents import (
     Agent,
