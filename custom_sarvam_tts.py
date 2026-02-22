@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import asyncio
+import base64
 import os
 import logging
 import numpy as np
-import io
-import wave
 
 from sarvamai import AsyncSarvamAI, AudioOutput, EventResponse
 
@@ -23,17 +23,6 @@ VALID_SPEAKERS_V3 = {
     "dev","ishita","shreya","manan","sumit","priya","aditya","kabir","neha",
     "varun","roopa","aayan","ashutosh","advait","amelia","sophia"
 }
-
-def _strip_wav_header(data: bytes) -> bytes:
-    """Strip WAV header and return raw PCM bytes."""
-    if data[:4] == b'RIFF':
-        try:
-            with wave.open(io.BytesIO(data)) as wf:
-                return wf.readframes(wf.getnframes())
-        except Exception:
-            # If WAV parsing fails, try skipping standard 44-byte header
-            return data[44:]
-    return data  # already raw PCM, return as-is
 
 
 class SarvamStreamingTTS(tts.TTS):
@@ -119,17 +108,17 @@ class SarvamChunkedStream(tts.ChunkedStream):
                 speaker=t._speaker,
                 pace=t._pace,
                 min_buffer_size=t._min_buffer_size,
-                # DO NOT set output_audio_codec — let Sarvam return WAV
+                output_audio_codec="linear16",
+                sample_rate=t._sample_rate,
             )
             await ws.convert(txt)
             await ws.flush()
 
             async for message in ws:
                 if isinstance(message, AudioOutput):
-                    raw = base64.b64decode(message.data.audio)
-                    pcm = _strip_wav_header(raw)
-                    if pcm:
-                        output_emitter.push(pcm)
+                    audio_bytes = base64.b64decode(message.data.audio)
+                    if audio_bytes:
+                        output_emitter.push(audio_bytes)
                         pushed_any = True
                 elif isinstance(message, EventResponse):
                     if message.data.event_type == "final":
@@ -201,17 +190,17 @@ class SarvamSynthStream(tts.SynthesizeStream):
                     speaker=t._speaker,
                     pace=t._pace,
                     min_buffer_size=t._min_buffer_size,
-                    # DO NOT set output_audio_codec — let Sarvam return WAV
+                    output_audio_codec="linear16",
+                    sample_rate=t._sample_rate,
                 )
                 await ws.convert(full_text)
                 await ws.flush()
 
                 async for message in ws:
                     if isinstance(message, AudioOutput):
-                        raw = base64.b64decode(message.data.audio)
-                        pcm = _strip_wav_header(raw)
-                        if pcm:
-                            output_emitter.push(pcm)
+                        audio_bytes = base64.b64decode(message.data.audio)
+                        if audio_bytes:
+                            output_emitter.push(audio_bytes)
                             pushed_any = True
                     elif isinstance(message, EventResponse):
                         if message.data.event_type == "final":
