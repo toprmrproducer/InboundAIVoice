@@ -329,9 +329,6 @@ async def entrypoint(ctx: JobContext):
             model="bulbul:v3",
             speaker=tts_voice,           # Dynamically set from UI config
             speech_sample_rate=8000,
-            streaming=True,
-            min_buffer_size=40,
-            enable_preprocessing=True,
         ),
         turn_detection="stt",
         min_endpointing_delay=0.15,     # Raised from 0.07 — stops false self-interruptions
