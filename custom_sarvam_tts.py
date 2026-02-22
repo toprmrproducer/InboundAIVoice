@@ -136,55 +136,44 @@ class SarvamSynthStream(tts.SynthesizeStream):
             mime_type="audio/pcm",
         )
 
-        # Buffer text tokens, synthesize per sentence boundary
-        sentence_buffer: list[str] = []
-
-        async def _flush_sentence(text: str) -> None:
-            text = text.strip()
-            if not text:
-                return
-
-            logger.debug(f"[SarvamTTS] Synthesising sentence: '{text[:80]}'")
-
-            segment_id = utils.shortuuid()
-            output_emitter.start_segment(segment_id=segment_id)  # ← one per full sentence
-
-            try:
-                client = AsyncSarvamAI(api_subscription_key=t._api_key)
-                async with client.text_to_speech_streaming.connect(model="bulbul:v3") as ws:
-                    await ws.configure(
-                        target_language_code=t._language,
-                        speaker=t._speaker,
-                        pace=t._pace,
-                        min_buffer_size=t._min_buffer_size,
-                        output_audio_codec="pcm",
-                    )
-                    await ws.convert(text)
-                    await ws.flush()
-
-                    async for message in ws:
-                        if isinstance(message, AudioOutput):
-                            output_emitter.push(base64.b64decode(message.data.audio))
-                        elif isinstance(message, EventResponse):
-                            if message.data.event_type == "final":
-                                break
-            finally:
-                output_emitter.end_segment()  # ← MUST end before next start_segment()
+        # Step 1: Collect the ENTIRE text from the input channel first
+        full_text_parts: list[str] = []
 
         async for data in self._input_ch:
             if isinstance(data, self._FlushSentinel):
-                # Flush whatever is left in the buffer
-                if sentence_buffer:
-                    await _flush_sentence("".join(sentence_buffer))
-                    sentence_buffer.clear()
+                continue  # ignore flush signals, we'll handle the full text at once
             elif isinstance(data, str):
-                sentence_buffer.append(data)
-                # Check for sentence-ending punctuation and flush eagerly
-                joined = "".join(sentence_buffer)
-                if joined.endswith((".", "?", "!", "।")):
-                    await _flush_sentence(joined)
-                    sentence_buffer.clear()
+                full_text_parts.append(data)
 
-        # Final drain if anything remains
-        if sentence_buffer:
-            await _flush_sentence("".join(sentence_buffer))
+        full_text = "".join(full_text_parts).strip()
+
+        if not full_text:
+            return
+
+        logger.debug(f"[SarvamTTS] Synthesising full response: '{full_text[:80]}'")
+
+        # Step 2: ONE segment for the entire response
+        segment_id = utils.shortuuid()
+        output_emitter.start_segment(segment_id=segment_id)
+
+        try:
+            client = AsyncSarvamAI(api_subscription_key=t._api_key)
+            async with client.text_to_speech_streaming.connect(model="bulbul:v3") as ws:
+                await ws.configure(
+                    target_language_code=t._language,
+                    speaker=t._speaker,
+                    pace=t._pace,
+                    min_buffer_size=t._min_buffer_size,
+                    output_audio_codec="pcm",
+                )
+                await ws.convert(full_text)
+                await ws.flush()
+
+                async for message in ws:
+                    if isinstance(message, AudioOutput):
+                        output_emitter.push(base64.b64decode(message.data.audio))
+                    elif isinstance(message, EventResponse):
+                        if message.data.event_type == "final":
+                            break
+        finally:
+            output_emitter.end_segment()
