@@ -393,52 +393,39 @@ async def entrypoint(ctx: JobContext):
     logger.info("[AGENT] Session live — waiting for caller audio.")
     call_start_time = datetime.now()
 
-    # ── Start call recording via LiveKit Egress ─────────────────────────────
-    # LiveKit Cloud stores the file automatically and returns a download URL.
-    # If you are self-hosted, set AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY /
-    # LIVEKIT_RECORDINGS_BUCKET in your environment to use S3 instead.
+    # ── Start call recording → Supabase Storage (S3-compatible) ───────────────
+    # Requires: SUPABASE_S3_ACCESS_KEY, SUPABASE_S3_SECRET_KEY, SUPABASE_S3_ENDPOINT
+    # Set these in Coolify/env after creating the 'call-recordings' Supabase bucket.
     egress_id = None
-    lk_api_for_egress = None
     try:
-        lk_api_for_egress = api.LiveKitAPI(
-            url=os.environ.get("LIVEKIT_URL", ""),
-            api_key=os.environ.get("LIVEKIT_API_KEY", ""),
-            api_secret=os.environ.get("LIVEKIT_API_SECRET", ""),
+        rec_api = api.LiveKitAPI(
+            url=os.environ["LIVEKIT_URL"],
+            api_key=os.environ["LIVEKIT_API_KEY"],
+            api_secret=os.environ["LIVEKIT_API_SECRET"],
         )
-        # Build output — prefer S3 if configured, else rely on LiveKit Cloud storage
-        s3_bucket = os.environ.get("LIVEKIT_RECORDINGS_BUCKET", "")
-        file_output = api.EncodedFileOutput(
-            filepath=f"recordings/{ctx.room.name}.mp3",
-            file_type=api.EncodedFileType.MP3,
-        )
-        if s3_bucket:
-            file_output = api.EncodedFileOutput(
-                filepath=f"recordings/{ctx.room.name}.mp3",
-                file_type=api.EncodedFileType.MP3,
-                s3=api.S3Upload(
-                    access_key=os.environ.get("AWS_ACCESS_KEY_ID", ""),
-                    secret=os.environ.get("AWS_SECRET_ACCESS_KEY", ""),
-                    bucket=s3_bucket,
-                    region=os.environ.get("AWS_REGION", "ap-south-1"),
-                ),
-            )
-        egress_info = await lk_api_for_egress.egress.start_room_composite_egress(
+        egress_resp = await rec_api.egress.start_room_composite_egress(
             api.RoomCompositeEgressRequest(
                 room_name=ctx.room.name,
                 audio_only=True,
-                file=file_output,
+                file_outputs=[api.EncodedFileOutput(
+                    file_type=api.EncodedFileType.OGG,
+                    filepath=f"recordings/{ctx.room.name}.ogg",
+                    s3=api.S3Upload(
+                        access_key=os.environ["SUPABASE_S3_ACCESS_KEY"],
+                        secret=os.environ["SUPABASE_S3_SECRET_KEY"],
+                        bucket="call-recordings",
+                        region=os.environ.get("SUPABASE_S3_REGION", "ap-south-1"),
+                        endpoint=os.environ["SUPABASE_S3_ENDPOINT"],
+                        force_path_style=True,
+                    )
+                )]
             )
         )
-        egress_id = egress_info.egress_id
-        logger.info(f"[RECORDING] Egress started: {egress_id}")
+        egress_id = egress_resp.egress_id
+        await rec_api.aclose()
+        logger.info(f"[RECORDING] Started egress: {egress_id}")
     except Exception as e:
-        logger.warning(f"[RECORDING] Could not start egress: {e}")
-        if lk_api_for_egress:
-            try:
-                await lk_api_for_egress.aclose()
-            except Exception:
-                pass
-            lk_api_for_egress = None
+        logger.warning(f"[RECORDING] Failed to start recording: {e}")
 
     @session.on("agent_speech_started")
     def _agent_speech_started(ev):
@@ -557,26 +544,26 @@ async def entrypoint(ctx: JobContext):
             logger.error(f"[SHUTDOWN] Could not read chat history: {e}")
             transcript_text = "unavailable"
         
-        # ── Stop Egress Recording ────────────────────────────────────────────────
+        # ── Stop recording + build Supabase URL ────────────────────────────────
         recording_url = ""
-        if egress_id and lk_api_for_egress:
+        if egress_id:
             try:
-                stop_info = await lk_api_for_egress.egress.stop_egress(
+                stop_api = api.LiveKitAPI(
+                    url=os.environ["LIVEKIT_URL"],
+                    api_key=os.environ["LIVEKIT_API_KEY"],
+                    api_secret=os.environ["LIVEKIT_API_SECRET"],
+                )
+                await stop_api.egress.stop_egress(
                     api.StopEgressRequest(egress_id=egress_id)
                 )
-                # Try to extract the download URL from file results
-                for f in (stop_info.file_results or []):
-                    if f.download_url:
-                        recording_url = f.download_url
-                        break
-                logger.info(f"[RECORDING] Egress stopped. URL: {recording_url or '(no URL yet — may still be processing)'}")
+                await stop_api.aclose()
+                recording_url = (
+                    f"{os.environ.get('SUPABASE_URL', '')}/storage/v1/object/public/"
+                    f"call-recordings/recordings/{ctx.room.name}.ogg"
+                )
+                logger.info(f"[RECORDING] Stopped. URL: {recording_url}")
             except Exception as e:
-                logger.warning(f"[RECORDING] Could not stop egress: {e}")
-            finally:
-                try:
-                    await lk_api_for_egress.aclose()
-                except Exception:
-                    pass
+                logger.warning(f"[RECORDING] Failed to stop egress: {e}")
 
         from db import save_call_log
         save_call_log(
