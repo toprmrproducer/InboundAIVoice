@@ -302,31 +302,80 @@ async def get_dashboard():
     .save-status {{ font-size: 13px; font-weight: 500; color: var(--green); opacity: 0; transition: opacity 0.3s; }}
 
     /* ── Calendar ── */
-    .cal-header {{ display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }}
-    .cal-grid {{ display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }}
-    .cal-day-name {{ text-align: center; font-size: 11px; color: var(--muted); font-weight: 600; padding: 6px 0; text-transform: uppercase; }}
+    .cal-header {{ display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }}
+    .cal-grid {{ display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }}
+    .cal-day-name {{ text-align: center; font-size: 11px; color: var(--muted); font-weight: 600; padding: 8px 0; text-transform: uppercase; letter-spacing: 0.06em; }}
     .cal-cell {{
-      min-height: 68px; background: var(--card); border: 1px solid var(--border);
-      border-radius: 8px; padding: 8px; cursor: pointer; transition: all 0.12s; position: relative;
+      min-height: 80px; background: var(--card); border: 1px solid var(--border);
+      border-radius: 10px; padding: 10px; cursor: pointer; transition: all 0.18s; position: relative;
     }}
-    .cal-cell:hover {{ border-color: var(--accent); background: var(--accent-glow); }}
-    .cal-cell.today {{ border-color: var(--accent); }}
-    .cal-cell.other-month {{ opacity: 0.35; }}
-    .cal-num {{ font-size: 13px; font-weight: 600; }}
-    .cal-dot {{ width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin-top: 4px; }}
-    .cal-booking-count {{ font-size: 10px; color: var(--accent); font-weight: 600; margin-top: 2px; }}
+    .cal-cell:hover {{ border-color: var(--accent); background: var(--accent-glow); transform: scale(1.03); box-shadow: 0 4px 20px rgba(108,99,255,0.15); }}
+    .cal-cell.today {{ border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); }}
+    .cal-cell.other-month {{ opacity: 0.3; }}
+    .cal-num {{ font-size: 13px; font-weight: 700; }}
+    .cal-dot {{ width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin-top: 6px; box-shadow: 0 0 6px var(--accent); }}
+    .cal-booking-count {{ font-size: 10px; color: var(--accent); font-weight: 600; margin-top: 3px; }}
     .day-panel {{ background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-top: 20px; display: none; }}
-    .day-panel.show {{ display: block; }}
-    .booking-item {{ padding: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; }}
+    .day-panel.show {{ display: block; animation: fadeIn 0.2s ease; }}
+    .booking-item {{ padding: 14px; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 10px; transition: border-color 0.15s; }}
+    .booking-item:hover {{ border-color: var(--accent); }}
     .booking-item:last-child {{ margin-bottom: 0; }}
+
+    /* ── Modal ── */
+    .modal-overlay {{
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.7); backdrop-filter: blur(6px);
+      z-index: 1000; align-items: center; justify-content: center;
+    }}
+    .modal-overlay.open {{ display: flex; animation: fadeIn 0.2s ease; }}
+    .modal-box {{
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 16px; padding: 28px; min-width: 480px; max-width: 600px; width: 90%;
+      box-shadow: 0 24px 60px rgba(0,0,0,0.5);
+      animation: slideUp 0.25s ease;
+    }}
+    .modal-title {{ font-size: 18px; font-weight: 700; margin-bottom: 6px; }}
+    .modal-sub {{ font-size: 12px; color: var(--muted); margin-bottom: 20px; }}
+    .modal-close {{
+      position: absolute; top: 20px; right: 24px;
+      background: none; border: none; color: var(--muted);
+      font-size: 20px; cursor: pointer; line-height: 1;
+    }}
+    .modal-close:hover {{ color: var(--text); }}
+    @keyframes fadeIn {{ from {{ opacity:0 }} to {{ opacity:1 }} }}
+    @keyframes slideUp {{ from {{ transform:translateY(20px); opacity:0 }} to {{ transform:translateY(0); opacity:1 }} }}
+
+    /* ── Premium extras ── */
+    .stat-card {{ transition: transform 0.15s, box-shadow 0.15s; }}
+    .stat-card:hover {{ transform: translateY(-3px); box-shadow: 0 8px 30px rgba(108,99,255,0.12); }}
+    .stat-accent {{ color: var(--accent); }}
+    .pulse {{ animation: pulse 2s infinite; }}
+    @keyframes pulse {{ 0%,100% {{ box-shadow: 0 0 6px var(--green); }} 50% {{ box-shadow: 0 0 14px var(--green); }} }}
   </style>
 </head>
 <body>
 
+<!-- ── Day Detail Modal ── -->
+<div class="modal-overlay" id="day-modal" onclick="if(event.target===this)closeDayModal()">
+  <div class="modal-box" style="position:relative;">
+    <button class="modal-close" onclick="closeDayModal()">✕</button>
+    <div class="modal-title" id="modal-date-title">Bookings</div>
+    <div class="modal-sub" id="modal-date-sub"></div>
+    <div id="modal-bookings-body"></div>
+  </div>
+</div>
+
 <!-- ── Sidebar ── -->
 <nav id="sidebar">
   <div class="sidebar-brand">
-    <div class="logo">🎙️</div>
+    <div class="logo">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="12" cy="12" r="10" fill="rgba(255,255,255,0.12)"/>
+        <path d="M8 12c0-2.21 1.79-4 4-4s4 1.79 4 4" stroke="white" stroke-width="1.8" stroke-linecap="round"/>
+        <circle cx="12" cy="15" r="2" fill="white"/>
+        <path d="M6 18c1.5-1.5 3.5-2.5 6-2.5s4.5 1 6 2.5" stroke="white" stroke-width="1.4" stroke-linecap="round" opacity="0.6"/>
+      </svg>
+    </div>
     <div>
       <div class="brand-text">Voice Agent</div>
       <div class="brand-sub">Med Spa AI</div>
@@ -345,7 +394,7 @@ async def get_dashboard():
     <div class="nav-item" onclick="goTo('crm', this); loadCRM();"><span class="icon">👥</span> CRM Contacts</div>
   </div>
   <div class="sidebar-footer">
-    <span class="status-dot"></span>Agent Online
+    <span class="status-dot pulse"></span>Agent Online
   </div>
 </nav>
 
@@ -730,41 +779,66 @@ function renderCalendar() {{
 }}
 
 function showDay(dateStr, bookings) {{
+  // Update old inline panel too
   const panel = document.getElementById('day-panel');
-  document.getElementById('day-panel-title').textContent = `Bookings on ${{dateStr}}`;
+  if (panel) {{
+    panel.classList.add('show');
+    document.getElementById('day-panel-title').textContent = `Bookings on ${{dateStr}}`;
+  }}
+  // Open modal overlay
+  openDayModal(dateStr, bookings);
+}}
+
+function openDayModal(dateStr, bookings) {{
+  const modal = document.getElementById('day-modal');
+  const dateObj = new Date(dateStr + 'T00:00:00');
+  const formatted = dateObj.toLocaleDateString('en-IN', {{weekday:'long', year:'numeric', month:'long', day:'numeric'}});
+  document.getElementById('modal-date-title').textContent = formatted;
+  document.getElementById('modal-date-sub').textContent =
+    bookings.length ? `${{bookings.length}} booking${{bookings.length>1?'s':''}} on this day` : 'No bookings on this day';
+
   if (!bookings || bookings.length === 0) {{
-    document.getElementById('day-panel-body').innerHTML = '<div style="color:var(--muted);font-size:13px;">No bookings on this day.</div>';
+    document.getElementById('modal-bookings-body').innerHTML =
+      '<div style="text-align:center;padding:32px;color:var(--muted);font-size:14px;">📅 No bookings on this day.</div>';
   }} else {{
-    document.getElementById('day-panel-body').innerHTML = bookings.map(b => `
+    document.getElementById('modal-bookings-body').innerHTML = bookings.map(b => `
       <div class="booking-item">
-        <div style="font-weight:600;font-size:13px;">📞 ${{b.phone_number || 'Unknown'}}</div>
-        <div style="font-size:12px;color:var(--muted);margin-top:4px;">${{b.summary || ''}}</div>
-        <div style="font-size:11px;color:var(--muted);margin-top:2px;">${{new Date(b.created_at).toLocaleTimeString()}}</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <div style="font-weight:700;font-size:14px;">📞 ${{b.phone_number || 'Unknown'}}</div>
+          <span class="badge badge-green">✅ Booked</span>
+        </div>
+        <div style="font-size:12px;color:var(--muted);margin-top:6px;">🕐 ${{new Date(b.created_at).toLocaleTimeString('en-IN', {{hour:'2-digit',minute:'2-digit'}})}}</div>
+        ${{b.summary ? `<div style="font-size:12px;color:var(--text);margin-top:6px;padding:8px;background:rgba(255,255,255,0.04);border-radius:6px;">💬 ${{b.summary}}</div>` : ''}}
       </div>`).join('');
   }}
-  panel.classList.add('show');
+  modal.classList.add('open');
 }}
+
+function closeDayModal() {{
+  document.getElementById('day-modal').classList.remove('open');
+}}
+document.addEventListener('keydown', e => {{ if (e.key === 'Escape') closeDayModal(); }});
 
 // ── CRM ─────────────────────────────────────────────────────────────────────
 async function loadCRM() {{
   const tbody = document.getElementById('crm-tbody');
   if (!tbody) return;
-  tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:32px;color:var(--muted);">Loading...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:32px;color:var(--muted);">Loading contacts...</td></tr>';
   try {{
     const contacts = await fetch('/api/contacts').then(r => r.json());
     if (!contacts.length) {{
-      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:32px;color:var(--muted);">No contacts yet. Calls will appear here automatically.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--muted);">No contacts yet. They will appear here automatically after calls.</td></tr>';
       return;
     }}
     tbody.innerHTML = contacts.map(c => `
-      <tr style="border-bottom:1px solid var(--border);">
-        <td style="padding:12px;">{{c.caller_name || '<span style=color:var(--muted)>Unknown</span>'}}</td>
-        <td style="padding:12px;font-weight:600;">{{c.phone_number || '—'}}</td>
-        <td style="padding:12px;text-align:center;">{{c.total_calls}}</td>
-        <td style="padding:12px;color:var(--muted);font-size:12px;">{{c.last_seen ? new Date(c.last_seen).toLocaleString() : '—'}}</td>
-        <td style="padding:12px;">{{c.is_booked
-          ? '<span style="background:#14532d;color:#22c55e;padding:2px 8px;border-radius:20px;font-size:11px;">✅ Booked</span>'
-          : '<span style="background:#1a1a2e;color:var(--muted);padding:2px 8px;border-radius:20px;font-size:11px;">📵 No booking</span>'}}</td>
+      <tr style="border-bottom:1px solid var(--border);transition:background 0.12s;" onmouseover="this.style.background='rgba(255,255,255,0.025)'" onmouseout="this.style.background=''">
+        <td style="padding:14px 16px;font-weight:600;">${{c.caller_name || '<span style="color:var(--muted);font-weight:400;">Unknown</span>'}}</td>
+        <td style="padding:14px 16px;font-family:monospace;font-size:13px;">${{c.phone_number || '—'}}</td>
+        <td style="padding:14px 16px;text-align:center;"><span style="background:rgba(108,99,255,0.12);color:var(--accent);padding:3px 10px;border-radius:20px;font-size:12px;font-weight:700;">${{c.total_calls}}</span></td>
+        <td style="padding:14px 16px;color:var(--muted);font-size:12px;">${{c.last_seen ? new Date(c.last_seen).toLocaleString('en-IN') : '—'}}</td>
+        <td style="padding:14px 16px;">${{c.is_booked
+          ? '<span class="badge badge-green">✅ Booked</span>'
+          : '<span class="badge badge-gray">📵 No booking</span>'}}</td>
       </tr>`).join('');
   }} catch(e) {{
     tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;color:#ef4444;">Error loading contacts. Check Supabase credentials.</td></tr>';
