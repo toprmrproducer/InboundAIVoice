@@ -51,10 +51,29 @@ def get_live_config():
     }
 
 def get_ist_time_context():
-    """Returns a string indicating the current Date, Day, and Time in Indian Standard Time (IST)."""
+    """Returns current IST date/time AND the next 7 days so the agent
+    can resolve 'this Thursday' / 'next Monday' to exact ISO dates."""
     ist = pytz.timezone('Asia/Kolkata')
     now = datetime.now(ist)
-    return f"\\n\\n[SYSTEM CONTEXT: Today is {now.strftime('%A, %B %d, %Y')}. The current time is {now.strftime('%I:%M %p')} IST. Use this for all relative date calculations.]"
+    today_str = now.strftime('%A, %B %d, %Y')
+    time_str  = now.strftime('%I:%M %p')
+
+    # Build a day-by-day lookup for the next 7 days
+    from datetime import timedelta
+    days_lines = []
+    for i in range(7):
+        day = now + timedelta(days=i)
+        label = "Today" if i == 0 else ("Tomorrow" if i == 1 else day.strftime('%A'))
+        days_lines.append(f"  {label}: {day.strftime('%A %d %B %Y')} → ISO {day.strftime('%Y-%m-%d')}")
+    days_block = "\n".join(days_lines)
+
+    return (
+        f"\n\n[SYSTEM CONTEXT]\n"
+        f"Current date & time: {today_str} at {time_str} IST\n"
+        f"Use the table below to resolve ANY relative day reference (e.g. 'this Friday', 'next Monday', 'day after tomorrow') to the correct ISO date:\n"
+        f"{days_block}\n"
+        f"Always use the ISO date from this table when calling save_booking_intent. Appointments are in IST (+05:30).]"
+    )
 
 from calendar_tools import get_available_slots, create_booking, cancel_booking
 from notify import (
