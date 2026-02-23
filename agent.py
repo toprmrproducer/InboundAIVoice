@@ -352,7 +352,6 @@ async def entrypoint(ctx: JobContext):
         ),
         llm=openai.LLM(
             model=llm_model,
-            max_tokens=150,           # Voice responses should be short — caps LLM latency
         ),
         tts=sarvam.TTS(
             target_language_code=tts_language,
