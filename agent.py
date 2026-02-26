@@ -432,26 +432,75 @@ async def entrypoint(ctx: JobContext):
             max_tokens=120,
         )
         logger.info(f"[LLM] Using Groq: {llm_model}")
+    elif llm_provider == "claude":
+        # Claude Haiku 3.5 via Anthropic API (#27)
+        _anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
+        agent_llm = openai.LLM(
+            model=llm_model or "claude-haiku-3-5-latest",
+            base_url="https://api.anthropic.com/v1/",
+            api_key=_anthropic_key,
+            max_tokens=120,
+        )
+        logger.info(f"[LLM] Using Claude via Anthropic: {llm_model}")
     else:
         agent_llm = openai.LLM(model=llm_model, max_tokens=120)  # cap tokens (#7)
         logger.info(f"[LLM] Using OpenAI: {llm_model}")
 
-    # ── Build STT (#1 16kHz, #20 auto-detect) ────────────────────────────
-    agent_stt = sarvam.STT(
-        language=stt_language,      # "unknown" = auto-detect (#20)
-        model="saaras:v3",
-        mode="translate",
-        flush_signal=True,
-        sample_rate=16000,          # force 16kHz (#1)
-    )
+    # ── Build STT (#1 16kHz, #20 auto-detect, #9 Deepgram) ──────────────
+    if stt_provider == "deepgram":
+        try:
+            from livekit.plugins import deepgram
+            agent_stt = deepgram.STT(
+                model="nova-2-general",
+                language="multi",        # multilingual mode
+                interim_results=False,
+            )
+            logger.info("[STT] Using Deepgram Nova-2")
+        except ImportError:
+            logger.warning("[STT] deepgram plugin not installed — falling back to Sarvam")
+            agent_stt = sarvam.STT(
+                language=stt_language,
+                model="saaras:v3",
+                mode="translate",
+                flush_signal=True,
+                sample_rate=16000,
+            )
+    else:
+        agent_stt = sarvam.STT(
+            language=stt_language,      # "unknown" = auto-detect (#20)
+            model="saaras:v3",
+            mode="translate",
+            flush_signal=True,
+            sample_rate=16000,          # force 16kHz (#1)
+        )
+        logger.info("[STT] Using Sarvam Saaras v3")
 
-    # ── Build TTS (#2 24kHz) ──────────────────────────────────────────────
-    agent_tts = sarvam.TTS(
-        target_language_code=tts_language,
-        model="bulbul:v3",
-        speaker=tts_voice,
-        sample_rate=24000,          # force 24kHz (#2)
-    )
+    # ── Build TTS (#2 24kHz, #10 ElevenLabs) ────────────────────────────
+    if tts_provider == "elevenlabs":
+        try:
+            from livekit.plugins import elevenlabs
+            _el_voice_id = live_config.get("elevenlabs_voice_id", "21m00Tcm4TlvDq8ikWAM")
+            agent_tts = elevenlabs.TTS(
+                model="eleven_turbo_v2_5",
+                voice_id=_el_voice_id,
+            )
+            logger.info(f"[TTS] Using ElevenLabs Turbo v2.5 — voice: {_el_voice_id}")
+        except ImportError:
+            logger.warning("[TTS] elevenlabs plugin not installed — falling back to Sarvam")
+            agent_tts = sarvam.TTS(
+                target_language_code=tts_language,
+                model="bulbul:v3",
+                speaker=tts_voice,
+                sample_rate=24000,
+            )
+    else:
+        agent_tts = sarvam.TTS(
+            target_language_code=tts_language,
+            model="bulbul:v3",
+            speaker=tts_voice,
+            sample_rate=24000,          # force 24kHz (#2)
+        )
+        logger.info(f"[TTS] Using Sarvam Bulbul v3 — voice: {tts_voice} lang: {tts_language}")
 
     # ── Sentence chunker (keep responses short for voice) ─────────────────
     def before_tts_cb(agent_response: str) -> str:

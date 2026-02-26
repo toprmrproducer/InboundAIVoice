@@ -358,6 +358,39 @@ async def get_demo_page():
     """Browser-based demo call page using LiveKit JS SDK."""
     return HTMLResponse(content=DEMO_PAGE_HTML)
 
+
+# ── Prometheus Metrics (#40) ──────────────────────────────────────────────────
+try:
+    from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
+    from fastapi.responses import Response as _Resp
+
+    _voice_calls_total   = Counter("voice_calls_total",   "Total calls handled by the agent")
+    _voice_calls_booked  = Counter("voice_calls_booked_total", "Calls that resulted in a booking")
+    _voice_call_duration = Histogram("voice_call_duration_seconds", "Call duration in seconds",
+                                      buckets=[10, 30, 60, 120, 300, 600, 1200])
+    _voice_calls_active  = Gauge("voice_calls_active", "Currently active calls")
+
+    @app.get("/metrics", include_in_schema=False)
+    def metrics():
+        """Prometheus metrics scrape endpoint."""
+        return _Resp(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+    @app.post("/internal/record-call", include_in_schema=False)
+    async def record_call_metric(request: Request):
+        """Called by agent.py at shutdown to update Prometheus counters."""
+        data = await request.json()
+        _voice_calls_total.inc()
+        if data.get("booked"):
+            _voice_calls_booked.inc()
+        if data.get("duration"):
+            _voice_call_duration.observe(data["duration"])
+        return {"ok": True}
+
+    logger.info("[METRICS] Prometheus metrics enabled at /metrics")
+
+except ImportError:
+    logger.warning("[METRICS] prometheus_client not installed — /metrics disabled")
+
 # ── Main Dashboard HTML ────────────────────────────────────────────────────────
 
 
