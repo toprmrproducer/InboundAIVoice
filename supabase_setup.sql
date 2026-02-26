@@ -11,6 +11,5 @@ CREATE TABLE call_logs (
 );
 
 -- Optional: Enable Row Level Security (RLS) if you plan to expose the DB to the frontend directly.
--- For this backend API approach, RLS is not strictly necessary but good practice.
 ALTER TABLE call_logs ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Enable all actions for service role" ON call_logs FOR ALL USING (true);
