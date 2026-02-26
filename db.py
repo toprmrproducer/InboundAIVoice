@@ -15,11 +15,22 @@ def get_supabase() -> Client | None:
         logger.error(f"Failed to initialize Supabase client: {e}")
         return None
 
-def save_call_log(phone: str, duration: int, transcript: str, summary: str = "", recording_url: str = "", caller_name: str = "") -> dict:
-    """
-    Saves a call log to the 'call_logs' table in Supabase.
-    If Supabase is not configured, logs it locally instead.
-    """
+def save_call_log(
+    phone: str,
+    duration: int,
+    transcript: str,
+    summary: str = "",
+    recording_url: str = "",
+    caller_name: str = "",
+    sentiment: str = "unknown",
+    estimated_cost_usd: float | None = None,
+    call_date: str | None = None,
+    call_hour: int | None = None,
+    call_day_of_week: str | None = None,
+    was_booked: bool = False,
+    interrupt_count: int = 0,
+) -> dict:
+    """Saves a call log to the 'call_logs' table in Supabase."""
     url = os.environ.get("SUPABASE_URL", "")
     key = os.environ.get("SUPABASE_KEY", "")
     if not url or not key:
@@ -31,22 +42,29 @@ def save_call_log(phone: str, duration: int, transcript: str, summary: str = "",
         return {"success": False, "message": "Supabase client failed"}
 
     try:
-        data = {
-            "phone_number": phone,
-            "duration_seconds": duration,
-            "transcript": transcript,
-            "summary": summary,
+        data: dict = {
+            "phone_number":      phone,
+            "duration_seconds":  duration,
+            "transcript":        transcript,
+            "summary":           summary,
+            "sentiment":         sentiment,
+            "was_booked":        was_booked,
+            "interrupt_count":   interrupt_count,
         }
-        if recording_url:
-            data["recording_url"] = recording_url
-        if caller_name:
-            data["caller_name"] = caller_name
+        if recording_url:           data["recording_url"]         = recording_url
+        if caller_name:             data["caller_name"]            = caller_name
+        if estimated_cost_usd is not None: data["estimated_cost_usd"] = estimated_cost_usd
+        if call_date:               data["call_date"]              = call_date
+        if call_hour is not None:   data["call_hour"]              = call_hour
+        if call_day_of_week:        data["call_day_of_week"]       = call_day_of_week
+
         res = supabase.table("call_logs").insert(data).execute()
-        logger.info(f"Successfully saved call log to Supabase for {phone}")
+        logger.info(f"Saved call log to Supabase for {phone}")
         return {"success": True, "data": res.data}
     except Exception as e:
-        logger.error(f"Failed to save call log to Supabase: {e}")
+        logger.error(f"Failed to save call log: {e}")
         return {"success": False, "message": str(e)}
+
 
 def fetch_call_logs(limit: int = 50) -> list:
     """

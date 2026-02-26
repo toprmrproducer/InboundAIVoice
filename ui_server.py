@@ -360,6 +360,16 @@ async def get_demo_page():
 
 # ── Main Dashboard HTML ────────────────────────────────────────────────────────
 
+
+@app.get("/health")
+def health_check():
+    """Health check endpoint for Coolify monitoring (#22)."""
+    return {
+        "status": "ok",
+        "timestamp": __import__("datetime").datetime.utcnow().isoformat(),
+        "service": "rapidx-ai-voice-agent",
+    }
+
 @app.get("/", response_class=HTMLResponse)
 async def get_dashboard():
     config = read_config()
