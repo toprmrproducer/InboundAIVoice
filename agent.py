@@ -429,7 +429,7 @@ async def entrypoint(ctx: JobContext):
     if llm_provider == "groq":
         agent_llm = openai.LLM.with_groq(
             model=llm_model or "llama-3.3-70b-versatile",
-            max_tokens=120,
+            max_completion_tokens=120,
         )
         logger.info(f"[LLM] Using Groq: {llm_model}")
     elif llm_provider == "claude":
@@ -439,11 +439,11 @@ async def entrypoint(ctx: JobContext):
             model=llm_model or "claude-haiku-3-5-latest",
             base_url="https://api.anthropic.com/v1/",
             api_key=_anthropic_key,
-            max_tokens=120,
+            max_completion_tokens=120,
         )
         logger.info(f"[LLM] Using Claude via Anthropic: {llm_model}")
     else:
-        agent_llm = openai.LLM(model=llm_model, max_tokens=120)  # cap tokens (#7)
+        agent_llm = openai.LLM(model=llm_model, max_completion_tokens=120)  # cap tokens (#7)
         logger.info(f"[LLM] Using OpenAI: {llm_model}")
 
     # ── Build STT (#1 16kHz, #20 auto-detect, #9 Deepgram) ──────────────
