@@ -400,7 +400,7 @@ async def entrypoint(ctx: JobContext):
             sb = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
             result = (sb.table("call_logs")
                         .select("summary, created_at")
-                        .eq("phone", phone)
+                        .eq("phone_number", phone)
                         .order("created_at", desc=True)
                         .limit(1)
                         .execute())
@@ -491,14 +491,14 @@ async def entrypoint(ctx: JobContext):
                 target_language_code=tts_language,
                 model="bulbul:v3",
                 speaker=tts_voice,
-                sample_rate=24000,
+                speech_sample_rate=24000,
             )
     else:
         agent_tts = sarvam.TTS(
             target_language_code=tts_language,
             model="bulbul:v3",
             speaker=tts_voice,
-            sample_rate=24000,          # force 24kHz (#2)
+            speech_sample_rate=24000,          # force 24kHz (#2)
         )
         logger.info(f"[TTS] Using Sarvam Bulbul v3 — voice: {tts_voice} lang: {tts_language}")
 
