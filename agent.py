@@ -396,8 +396,9 @@ async def entrypoint(ctx: JobContext):
         if phone == "unknown":
             return ""
         try:
-            from supabase import create_client
-            sb = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
+            sb = db.get_supabase()
+            if not sb:
+                return ""
             result = (sb.table("call_logs")
                         .select("summary, created_at")
                         .eq("phone_number", phone)
@@ -590,15 +591,15 @@ async def entrypoint(ctx: JobContext):
     # ── Upsert active_calls (#38) ─────────────────────────────────────────
     async def upsert_active_call(status: str):
         try:
-            from supabase import create_client
-            sb = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
-            sb.table("active_calls").upsert({
-                "room_id":     ctx.room.name,
-                "phone":       caller_phone,
-                "caller_name": caller_name,
-                "status":      status,
-                "last_updated": datetime.utcnow().isoformat(),
-            }).execute()
+            sb = db.get_supabase()
+            if sb:
+                sb.table("active_calls").upsert({
+                    "room_id":     ctx.room.name,
+                    "phone":       caller_phone,
+                    "caller_name": caller_name,
+                    "status":      status,
+                    "last_updated": datetime.utcnow().isoformat(),
+                }).execute()
         except Exception as e:
             logger.debug(f"[ACTIVE-CALL] {e}")
 
@@ -607,14 +608,14 @@ async def entrypoint(ctx: JobContext):
     # ── Real-time transcript streaming (#33) ─────────────────────────────
     async def _log_transcript(role: str, content: str):
         try:
-            from supabase import create_client
-            sb = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
-            sb.table("call_transcripts").insert({
-                "call_room_id": ctx.room.name,
-                "phone":        caller_phone,
-                "role":         role,
-                "content":      content,
-            }).execute()
+            sb = db.get_supabase()
+            if sb:
+                sb.table("call_transcripts").insert({
+                    "call_room_id": ctx.room.name,
+                    "phone":        caller_phone,
+                    "role":         role,
+                    "content":      content,
+                }).execute()
         except Exception as e:
             logger.debug(f"[TRANSCRIPT-STREAM] {e}")
 
